@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { PoseLandmarker, DrawingUtils } from '@mediapipe/tasks-vision';
 import type { NormalizedLandmark } from '@mediapipe/tasks-vision';
-
 import { tr } from '../i18n.ts';
 import type { StringKey } from '../i18n.ts';
 import { AudioCoach } from '../lib/audio.ts';
@@ -19,7 +18,13 @@ import {
 import { CprDetector } from '../lib/cprDetector.ts';
 import { CsvRecorder } from '../lib/csvRecorder.ts';
 import type { RecorderMeta } from '../lib/csvRecorder.ts';
-import { chooseSide, classifyByThreshold, computeArmMetrics, isArmVisible, TimeEma } from '../lib/posture.ts';
+import {
+  chooseSide,
+  classifyByThreshold,
+  computeArmMetrics,
+  isArmVisible,
+  TimeEma,
+} from '../lib/posture.ts';
 import type { ArmSide, PostureLabel } from '../lib/posture.ts';
 import { getPostureModel, predictPosture } from '../lib/postureModel.ts';
 import { SessionScorer } from '../lib/sessionScorer.ts';
@@ -27,10 +32,10 @@ import type { SessionSummary } from '../lib/sessionScorer.ts';
 import { DualArmHandTracker } from '../tracking/DualArmHandTracker.ts';
 import { ProceduralArmHandRig } from '../tracking/ProceduralArmHandMesh.ts';
 import type { TrackResult } from '../tracking/types.ts';
-
 import { EmergencyPanel } from './EmergencyPanel.tsx';
 import { RecorderPanel } from './RecorderPanel.tsx';
 import { SummaryCard } from './SummaryCard.tsx';
+import type { CoachState } from '../lib/coachAudio.ts';
 
 type AppMode = 'PRACTICE' | 'EMERGENCY';
 type Phase = 'IDLE' | 'COUNTDOWN' | 'ACTIVE';
@@ -65,7 +70,8 @@ const INITIAL_HUD: Hud = {
   taps: 0,
 };
 
-/** Dữ liệu cập nhật ở tốc độ khung hình, KHÔNG gây render lại React. HUD lấy mẫu từ đây ~8 lần/giây. */
+/** Dữ liệu cập nhật ở tốc độ khung hình, KHÔNG gây render lại React.
+HUD lấy mẫu từ đây ~8 lần/giây. */
 interface Live {
   fps: number;
   tracking: boolean;
@@ -83,6 +89,7 @@ interface SessionRef {
 }
 
 const CUE_COOLDOWN_MS = 3200;
+
 const CUE_TEXT: Record<CueId, StringKey> = {
   faster: 'cueFaster',
   slower: 'cueSlower',
@@ -92,30 +99,45 @@ const CUE_TEXT: Record<CueId, StringKey> = {
 
 function cameraErrorKey(e: unknown): StringKey {
   const name = e instanceof DOMException ? e.name : '';
-  if (name === 'NotAllowedError' || name === 'SecurityError') return 'errCameraDenied';
-  if (name === 'NotFoundError' || name === 'OverconstrainedError') return 'errCameraNotFound';
+  if (name === 'NotAllowedError' || name === 'SecurityError')
+    return 'errCameraDenied';
+  if (name === 'NotFoundError' || name === 'OverconstrainedError')
+    return 'errCameraNotFound';
   return 'errCameraOther';
 }
 
 interface Props {
   lang: Lang;
+  onCoachStatusChange?: (status: {
+    state: CoachState;
+    bpm: number | null;
+    isActiveSession: boolean;
+    externalSpeaking: boolean;
+  }) => void;
 }
 
-export function PoseTracker({ lang }: Props) {
+export function PoseTracker({ lang, onCoachStatusChange }: Props) {
   const t = tr(lang);
   const isEn = lang === 'en';
 
-  // ---- DOM / engine objects (ổn định giữa các lần render) ----
+  // ---- DOM / engine objects (ổn định giữa các lần render)
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const [coach] = useState(() => new AudioCoach());
+  const [coachSpeaking, setCoachSpeaking] = useState(false);
+  const [coach] = useState(
+    () => new AudioCoach((speaking) => setCoachSpeaking(speaking))
+  );
   const [detector] = useState(() => new CprDetector());
   const [recorder] = useState(() => new CsvRecorder());
   const scorerRef = useRef(new SessionScorer());
 
-  // ---- State hiển thị ----
+  // ---- State hiển thị
   const [mode, setMode] = useState<AppMode>('PRACTICE');
-  const [engine, setEngine] = useState<{ status: 'LOADING' | 'READY' | 'ERROR'; errorKey: StringKey | null; cpu: boolean }>({
+  const [engine, setEngine] = useState<{
+    status: 'LOADING' | 'READY' | 'ERROR';
+    errorKey: StringKey | null;
+    cpu: boolean;
+  }>({
     status: 'LOADING',
     errorKey: null,
     cpu: false,
@@ -139,28 +161,58 @@ export function PoseTracker({ lang }: Props) {
     lighting: 'BRIGHT',
     device: '',
   });
-
-  // ---- Refs phản chiếu state để vòng lặp khung hình đọc được mà không bị "stale" ----
+  
+  // ---- Refs phản chiếu state để vòng lặp khung hình đọc được mà không bị "stale"
   const modeRef = useRef(mode);
   const langRef = useRef(lang);
   const showCameraRef = useRef(showCamera);
   const show3dMeshRef = useRef(show3dMesh);
   const isRecordingRef = useRef(isRecording);
   const recMetaRef = useRef(recMeta);
-  useEffect(() => { modeRef.current = mode; }, [mode]);
-  useEffect(() => { langRef.current = lang; }, [lang]);
-  useEffect(() => { showCameraRef.current = showCamera; }, [showCamera]);
-  useEffect(() => { show3dMeshRef.current = show3dMesh; }, [show3dMesh]);
-  useEffect(() => { isRecordingRef.current = isRecording; }, [isRecording]);
-  useEffect(() => { recMetaRef.current = recMeta; }, [recMeta]);
 
-  const sessionRef = useRef<SessionRef>({ phase: 'IDLE', phaseEndsAt: 0, startedAt: 0 });
-  const liveRef = useRef<Live>({ fps: 0, tracking: false, bpm: null, rate: 'WAIT', posture: 'LOST', elbow: 0, offset: 0 });
+  useEffect(() => {
+    modeRef.current = mode;
+  }, [mode]);
+  useEffect(() => {
+    langRef.current = lang;
+  }, [lang]);
+  useEffect(() => {
+    showCameraRef.current = showCamera;
+  }, [showCamera]);
+  useEffect(() => {
+    show3dMeshRef.current = show3dMesh;
+  }, [show3dMesh]);
+  useEffect(() => {
+    isRecordingRef.current = isRecording;
+  }, [isRecording]);
+  useEffect(() => {
+    recMetaRef.current = recMeta;
+  }, [recMeta]);
+
+  const sessionRef = useRef<SessionRef>({
+    phase: 'IDLE',
+    phaseEndsAt: 0,
+    startedAt: 0,
+  });
+  const liveRef = useRef<Live>({
+    fps: 0,
+    tracking: false,
+    bpm: null,
+    rate: 'WAIT',
+    posture: 'LOST',
+    elbow: 0,
+    offset: 0,
+  });
   const tapsRef = useRef(0);
   const lastCueAtRef = useRef(0);
-  const lastCueByIdRef = useRef<Record<CueId, number>>({ faster: 0, slower: 0, straighten: 0, shoulders: 0 });
+  const lastCueByIdRef = useRef<Record<CueId, number>>({
+    faster: 0,
+    slower: 0,
+    straighten: 0,
+    shoulders: 0,
+  });
 
-  // ---------------------------------------------------------------- âm thanh
+  // ---- Âm thanh
   useEffect(() => {
     let cancelled = false;
     void coach.preload(lang).then((r) => {
@@ -173,18 +225,25 @@ export function PoseTracker({ lang }: Props) {
 
   useEffect(() => () => coach.dispose(), [coach]);
 
-  // ---------------------------------------------------------------- điều khiển phiên
+  // ---- Điều khiển phiên
   const beginActive = (now: number) => {
     detector.reset();
     scorerRef.current = new SessionScorer();
     lastCueAtRef.current = 0;
-    sessionRef.current = { phase: 'ACTIVE', phaseEndsAt: now + SESSION_SECONDS * 1000, startedAt: now };
+    sessionRef.current = {
+      phase: 'ACTIVE',
+      phaseEndsAt: now + SESSION_SECONDS * 1000,
+      startedAt: now,
+    };
   };
 
   const finishSession = (now: number) => {
     const s = sessionRef.current;
     if (s.phase === 'ACTIVE') {
-      const elapsed = Math.max(1, Math.min(SESSION_SECONDS, (now - s.startedAt) / 1000));
+      const elapsed = Math.max(
+        1,
+        Math.min(SESSION_SECONDS, (now - s.startedAt) / 1000)
+      );
       setSummary(scorerRef.current.summarize(elapsed));
     }
     sessionRef.current = { phase: 'IDLE', phaseEndsAt: 0, startedAt: 0 };
@@ -223,7 +282,7 @@ export function PoseTracker({ lang }: Props) {
     }
   };
 
-  // ---------------------------------------------------------------- ghi dữ liệu
+  // ---- Ghi dữ liệu
   const toggleRecording = () => {
     if (isRecording) {
       setIsRecording(false);
@@ -255,29 +314,100 @@ export function PoseTracker({ lang }: Props) {
     return () => window.removeEventListener('keydown', onKey);
   }, [recorder]);
 
-  // ---------------------------------------------------------------- HUD (~8 lần/giây) + đồng hồ phiên
   useEffect(() => {
-    const id = window.setInterval(() => {
-      const now = performance.now();
-      const s = sessionRef.current;
-      if (s.phase === 'COUNTDOWN' && now >= s.phaseEndsAt) beginActive(now);
-      else if (s.phase === 'ACTIVE' && now >= s.phaseEndsAt) finishSession(now);
+  const id = window.setInterval(() => {
+    const now = performance.now();
+    const s = sessionRef.current;
 
-      const cur = sessionRef.current;
-      const l = liveRef.current;
-      setHud({
-        ...l,
-        phase: cur.phase,
-        secondsLeft: cur.phase === 'IDLE' ? 0 : Math.max(0, Math.ceil((cur.phaseEndsAt - now) / 1000)),
-        rows: recorder.count,
-        taps: tapsRef.current,
-      });
-    }, HUD_INTERVAL_MS);
-    return () => window.clearInterval(id);
-    // beginActive/finishSession chỉ dùng ref và setter ổn định nên không cần đưa vào deps
-  }, [recorder, detector]);
+    if (s.phase === 'COUNTDOWN' && now >= s.phaseEndsAt) {
+      beginActive(now);
+    } else if (s.phase === 'ACTIVE' && now >= s.phaseEndsAt) {
+      finishSession(now);
+    }
 
-  // ---------------------------------------------------------------- vòng lặp AI + camera + lưới 3D
+    const cur = sessionRef.current;
+    const live = liveRef.current;
+    const secondsLeft =
+      cur.phase === 'IDLE'
+        ? 0
+        : Math.max(0, Math.ceil((cur.phaseEndsAt - now) / 1000));
+
+    setHud({
+      fps: live.fps,
+      tracking: live.tracking,
+      bpm: live.bpm,
+      rate: live.rate,
+      posture: live.posture,
+      elbow: live.elbow,
+      offset: live.offset,
+      phase: cur.phase,
+      secondsLeft,
+      rows: recorder.count, // kiểm tra lại tên thuộc tính đếm dòng trong ../lib/csvRecorder.ts
+      taps: tapsRef.current,
+    });
+  }, HUD_INTERVAL_MS);
+
+  return () => window.clearInterval(id);
+}, [recorder]);
+
+  // ---- Đồng bộ trạng thái sang nhân vật AI Coach 3D
+  useEffect(() => {
+    if (!onCoachStatusChange) return;
+    const isActiveSession = mode === 'PRACTICE' && hud.phase === 'ACTIVE';
+    const suppressCoachSpeech =
+      isActiveSession || (mode === 'PRACTICE' && hud.phase === 'COUNTDOWN');
+    let nextState: CoachState = 'idle';
+
+    if (mode === 'EMERGENCY' || hud.phase === 'COUNTDOWN') {
+      nextState = 'demo';
+    } else if (isActiveSession && hud.tracking) {
+      if (hud.posture === 'BENT_ELBOW' || hud.posture === 'OFF_AXIS') {
+        nextState = 'fix_elbow';
+      } else if (hud.rate === 'LOW') {
+        nextState = 'too_slow';
+      } else if (hud.rate === 'HIGH') {
+        nextState = 'too_fast';
+      } else if (hud.rate === 'OK' && hud.posture === 'CORRECT_POSTURE') {
+        nextState = 'good';
+      }
+    } else if (
+      mode === 'PRACTICE' &&
+      hud.phase === 'IDLE' &&
+      summary?.enoughData
+    ) {
+      if (summary.mainIssue === 'NONE') {
+        nextState = 'good';
+      } else if (
+        summary.mainIssue === 'BENT_ELBOW' ||
+        summary.mainIssue === 'OFF_AXIS'
+      ) {
+        nextState = 'fix_elbow';
+      } else if (summary.mainIssue === 'TOO_SLOW') {
+        nextState = 'too_slow';
+      } else if (summary.mainIssue === 'TOO_FAST') {
+        nextState = 'too_fast';
+      }
+    }
+
+    onCoachStatusChange({
+      state: nextState,
+      bpm: hud.bpm,
+      isActiveSession: suppressCoachSpeech,
+      externalSpeaking: coachSpeaking,
+    });
+  }, [
+    mode,
+    hud.phase,
+    hud.tracking,
+    hud.posture,
+    hud.rate,
+    hud.bpm,
+    summary,
+    coachSpeaking,
+    onCoachStatusChange,
+  ]);
+
+  // ---- Vòng lặp AI + camera + lưới 3D
   useEffect(() => {
     let cancelled = false;
     let tracker: DualArmHandTracker | null = null;
@@ -292,11 +422,21 @@ export function PoseTracker({ lang }: Props) {
     });
     glRenderer.setPixelRatio(1);
     glRenderer.setClearColor(0x000000, 0);
+
     const glScene = new THREE.Scene();
-    const glCamera = new THREE.OrthographicCamera(-16 / 9, 16 / 9, 1, -1, 0.01, 100);
+    const glCamera = new THREE.OrthographicCamera(
+      -16 / 9,
+      16 / 9,
+      1,
+      -1,
+      0.01,
+      100
+    );
     glCamera.position.set(0, 0, 10);
+
     const armRig = new ProceduralArmHandRig(0x22ff66, 0x44ffaa);
     glScene.add(armRig.group);
+
     let glWidth = 0;
     let glHeight = 0;
 
@@ -314,23 +454,29 @@ export function PoseTracker({ lang }: Props) {
     const model = getPostureModel();
 
     const pickCue = (cands: CueId[], now: number) => {
-      if (cands.length === 0 || now - lastCueAtRef.current < CUE_COOLDOWN_MS) return;
+      if (cands.length === 0 || now - lastCueAtRef.current < CUE_COOLDOWN_MS)
+        return;
       let best = cands[0];
-      for (const c of cands) if (lastCueByIdRef.current[c] < lastCueByIdRef.current[best]) best = c;
+      for (const c of cands) {
+        if (lastCueByIdRef.current[c] < lastCueByIdRef.current[best]) best = c;
+      }
       const text = tr(langRef.current)(CUE_TEXT[best]);
       coach.playCue(best, langRef.current, text);
       lastCueAtRef.current = now;
       lastCueByIdRef.current[best] = now;
     };
 
-    const processFrame = (lm: NormalizedLandmark[], now: number, aspect: number) => {
+    const processFrame = (
+      lm: NormalizedLandmark[],
+      now: number,
+      aspect: number
+    ) => {
       const dt = lastFrameAt === 0 ? 0 : now - lastFrameAt;
       lastFrameAt = now;
       const live = liveRef.current;
 
       side = chooseSide(lm, side);
       const m = computeArmMetrics(lm, aspect, side);
-
       if (!isArmVisible(m)) {
         detector.notifyLost();
         angleEma.reset();
@@ -349,7 +495,9 @@ export function PoseTracker({ lang }: Props) {
       live.offset = Number(offset.toFixed(2));
 
       // Tư thế: bộ phân loại đội huấn luyện nếu có, nếu không thì ngưỡng cố định
-      const posture: PostureLabel = model ? predictPosture(model, angle, offset).label : classifyByThreshold(angle, offset);
+      const posture: PostureLabel = model
+        ? predictPosture(model, angle, offset).label
+        : classifyByThreshold(angle, offset);
       live.posture = posture;
 
       // Nhịp
@@ -365,8 +513,12 @@ export function PoseTracker({ lang }: Props) {
       const sess = sessionRef.current;
       if (modeRef.current === 'PRACTICE' && sess.phase === 'ACTIVE') {
         if (out.peak) scorerRef.current.addPeak();
-        scorerRef.current.addFrame({ dtMs: dt, compressing: out.compressing, bpm: out.bpm, posture });
-
+        scorerRef.current.addFrame({
+          dtMs: dt,
+          compressing: out.compressing,
+          bpm: out.bpm,
+          posture,
+        });
         if (out.compressing) {
           const cands: CueId[] = [];
           if (posture === 'BENT_ELBOW') cands.push('straighten');
@@ -392,12 +544,22 @@ export function PoseTracker({ lang }: Props) {
     };
 
     let halted = false;
+
     const loop = () => {
       if (halted) return;
       raf = requestAnimationFrame(loop);
+
       const video = videoRef.current;
       const canvas = canvasRef.current;
-      if (!video || !canvas || !tracker || video.readyState < 2 || video.videoWidth === 0) return;
+      if (
+        !video ||
+        !canvas ||
+        !tracker ||
+        video.readyState < 2 ||
+        video.videoWidth === 0
+      )
+        return;
+
       // Chỉ xử lý khi có khung hình video mới
       if (video.currentTime === lastVideoTime) return;
       lastVideoTime = video.currentTime;
@@ -408,16 +570,22 @@ export function PoseTracker({ lang }: Props) {
 
       fpsCount += 1;
       if (now - fpsWindowStart >= 1000) {
-        liveRef.current.fps = Math.round((fpsCount * 1000) / (now - fpsWindowStart));
+        liveRef.current.fps = Math.round(
+          (fpsCount * 1000) / (now - fpsWindowStart)
+        );
         fpsCount = 0;
         fpsWindowStart = now;
       }
 
-      if (canvas.width !== video.videoWidth || canvas.height !== video.videoHeight) {
+      if (
+        canvas.width !== video.videoWidth ||
+        canvas.height !== video.videoHeight
+      ) {
         canvas.width = video.videoWidth;
         canvas.height = video.videoHeight;
         drawing = null;
       }
+
       if (glWidth !== video.videoWidth || glHeight !== video.videoHeight) {
         glWidth = video.videoWidth;
         glHeight = video.videoHeight;
@@ -445,16 +613,23 @@ export function PoseTracker({ lang }: Props) {
         }
         return;
       }
+
       if (!result) return;
 
       ctx.clearRect(0, 0, canvas.width, canvas.height);
-      if (showCameraRef.current) ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      if (showCameraRef.current)
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
-      // khung căn chỉnh
+      // Khung căn chỉnh
       ctx.strokeStyle = 'rgba(56, 189, 248, 0.35)';
       ctx.setLineDash([8, 8]);
       ctx.lineWidth = 2;
-      ctx.strokeRect(canvas.width * 0.15, canvas.height * 0.1, canvas.width * 0.7, canvas.height * 0.85);
+      ctx.strokeRect(
+        canvas.width * 0.15,
+        canvas.height * 0.1,
+        canvas.width * 0.7,
+        canvas.height * 0.85
+      );
       ctx.setLineDash([]);
 
       const lm = result.poseLandmarks;
@@ -462,10 +637,23 @@ export function PoseTracker({ lang }: Props) {
         if (show3dMeshRef.current) {
           armRig.update(result.frames);
           glRenderer.render(glScene, glCamera);
-          ctx.drawImage(glRenderer.domElement, 0, 0, canvas.width, canvas.height);
+          ctx.drawImage(
+            glRenderer.domElement,
+            0,
+            0,
+            canvas.width,
+            canvas.height
+          );
         } else {
-          drawing.drawConnectors(lm, PoseLandmarker.POSE_CONNECTIONS, { color: '#22C55E', lineWidth: 3 });
-          drawing.drawLandmarks(lm, { color: '#EF4444', lineWidth: 1, radius: 4 });
+          drawing.drawConnectors(lm, PoseLandmarker.POSE_CONNECTIONS, {
+            color: '#22C55E',
+            lineWidth: 3,
+          });
+          drawing.drawLandmarks(lm, {
+            color: '#EF4444',
+            lineWidth: 1,
+            radius: 4,
+          });
         }
         processFrame(lm, now, video.videoWidth / video.videoHeight);
       } else {
@@ -488,9 +676,11 @@ export function PoseTracker({ lang }: Props) {
       } catch {
         tracker?.dispose();
         tracker = null;
-        if (!cancelled) setEngine({ status: 'ERROR', errorKey: 'errModel', cpu: false });
+        if (!cancelled)
+          setEngine({ status: 'ERROR', errorKey: 'errModel', cpu: false });
         return;
       }
+
       if (cancelled) {
         tracker?.dispose();
         tracker = null;
@@ -502,15 +692,22 @@ export function PoseTracker({ lang }: Props) {
         setEngine({ status: 'ERROR', errorKey: 'errCameraInsecure', cpu });
         return;
       }
+
       try {
         stream = await navigator.mediaDevices.getUserMedia({
-          video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: 'user' },
+          video: {
+            width: { ideal: 1280 },
+            height: { ideal: 720 },
+            facingMode: 'user',
+          },
           audio: false,
         });
       } catch (e) {
-        if (!cancelled) setEngine({ status: 'ERROR', errorKey: cameraErrorKey(e), cpu });
+        if (!cancelled)
+          setEngine({ status: 'ERROR', errorKey: cameraErrorKey(e), cpu });
         return;
       }
+
       if (cancelled) {
         stream?.getTracks().forEach((tk) => tk.stop());
         stream = null;
@@ -525,6 +722,7 @@ export function PoseTracker({ lang }: Props) {
       } catch {
         /* một số trình duyệt ném lỗi khi bị gián đoạn; vòng lặp vẫn chờ readyState */
       }
+
       if (cancelled) return;
       setEngine({ status: 'READY', errorKey: null, cpu });
       raf = requestAnimationFrame(loop);
@@ -545,11 +743,11 @@ export function PoseTracker({ lang }: Props) {
     };
   }, [coach, detector, recorder]);
 
-  // ---------------------------------------------------------------- ghi hình & xem lại video
+  // ---- Ghi hình & xem lại video
   const getSupportedMimeType = () => {
     const types = [
-      'video/webm;codecs=vp9',
-      'video/webm;codecs=vp8',
+      'video/webm; codecs=vp9',
+      'video/webm; codecs=vp8',
       'video/webm',
       'video/mp4',
     ];
@@ -569,14 +767,19 @@ export function PoseTracker({ lang }: Props) {
 
     recordedChunksRef.current = [];
     const mimeType = getSupportedMimeType();
-    const rec = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+    const rec = new MediaRecorder(
+      stream,
+      mimeType ? { mimeType } : undefined
+    );
 
     rec.ondataavailable = (e) => {
       if (e.data.size > 0) recordedChunksRef.current.push(e.data);
     };
 
     rec.onstop = () => {
-      const blob = new Blob(recordedChunksRef.current, { type: mimeType || 'video/webm' });
+      const blob = new Blob(recordedChunksRef.current, {
+        type: mimeType || 'video/webm',
+      });
       setRecordedUrl(URL.createObjectURL(blob));
     };
 
@@ -598,7 +801,7 @@ export function PoseTracker({ lang }: Props) {
     };
   }, [recordedUrl]);
 
-  // ---------------------------------------------------------------- hiển thị
+  // ---- Hiển thị
   const practice = mode === 'PRACTICE';
   const usingModel = getPostureModel() !== null;
 
@@ -609,14 +812,26 @@ export function PoseTracker({ lang }: Props) {
     OK: 'fbRateOk',
     HIGH: 'fbRateHigh',
   };
+
   const postureText = (p: PostureState): StringKey | null => {
     if (p === 'LOST') return 'fbNoArm';
     if (p === 'BENT_ELBOW') return 'fbBent';
     if (p === 'OFF_AXIS') return 'fbOffAxis';
     return 'fbPostureOk';
   };
-  const rateClass = hud.rate === 'OK' ? 'good' : hud.rate === 'LOW' || hud.rate === 'HIGH' ? 'warn' : 'idle';
-  const postureClass = hud.posture === 'CORRECT_POSTURE' ? 'good' : hud.posture === 'LOST' ? 'idle' : 'warn';
+
+  const rateClass =
+    hud.rate === 'OK'
+      ? 'good'
+      : hud.rate === 'LOW' || hud.rate === 'HIGH'
+        ? 'warn'
+        : 'idle';
+  const postureClass =
+    hud.posture === 'CORRECT_POSTURE'
+      ? 'good'
+      : hud.posture === 'LOST'
+        ? 'idle'
+        : 'warn';
   const pText = postureText(hud.posture);
 
   // Trạng thái viền camera phát sáng theo tư thế / nhịp
@@ -633,7 +848,9 @@ export function PoseTracker({ lang }: Props) {
   const targetLeftPct = ((TARGET_BPM_MIN - GAUGE_MIN) / gaugeSpan) * 100;
   const targetWidthPct = ((TARGET_BPM_MAX - TARGET_BPM_MIN) / gaugeSpan) * 100;
   const bpmPct =
-    hud.bpm !== null ? Math.max(0, Math.min(100, ((hud.bpm - GAUGE_MIN) / gaugeSpan) * 100)) : null;
+    hud.bpm !== null
+      ? Math.max(0, Math.min(100, ((hud.bpm - GAUGE_MIN) / gaugeSpan) * 100))
+      : null;
 
   // Badge trạng thái AI ở góc trên bên trái camera
   const badgeState =
@@ -644,32 +861,60 @@ export function PoseTracker({ lang }: Props) {
         : hud.tracking
           ? 'tracking'
           : 'ready';
+
   const badgeLabel =
     engine.status === 'ERROR'
-      ? 'AI ERROR'
+      ? isEn
+        ? 'AI ERROR'
+        : 'LỖI AI'
       : engine.status === 'LOADING'
-        ? 'LOADING AI...'
+        ? isEn
+          ? 'LOADING AI...'
+          : 'ĐANG TẢI AI...'
         : hud.tracking
-          ? `AI TRACKING · ${engine.cpu ? 'CPU' : 'GPU'}`
-          : `AI READY · ${engine.cpu ? 'CPU' : 'GPU'}`;
+          ? `${isEn ? 'AI TRACKING' : 'AI ĐANG THEO DÕI'} · ${engine.cpu ? 'CPU' : 'GPU'}`
+          : `${isEn ? 'AI READY' : 'AI SẴN SÀNG'} · ${engine.cpu ? 'CPU' : 'GPU'}`;
 
   return (
     <div className="tracker">
       <div className="mode-switch" role="tablist">
-        <button type="button" role="tab" aria-selected={practice} className={practice ? 'active practice' : ''} onClick={() => switchMode('PRACTICE')}>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={practice}
+          className={practice ? 'active practice' : ''}
+          onClick={() => switchMode('PRACTICE')}
+        >
           {t('modePractice')}
         </button>
-        <button type="button" role="tab" aria-selected={!practice} className={!practice ? 'active emergency' : ''} onClick={() => switchMode('EMERGENCY')}>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={!practice}
+          className={!practice ? 'active emergency' : ''}
+          onClick={() => switchMode('EMERGENCY')}
+        >
           {t('modeEmergency')}
         </button>
       </div>
 
-      {!practice && <EmergencyPanel t={t} metronomeOn={metronomeOn} onToggleMetronome={toggleMetronome} />}
+      {!practice && (
+        <EmergencyPanel
+          t={t}
+          metronomeOn={metronomeOn}
+          onToggleMetronome={toggleMetronome}
+        />
+      )}
 
       {practice && (
         <div className="session-bar">
           {hud.phase === 'IDLE' ? (
-            <button type="button" className="btn-primary" onClick={startSession} disabled={engine.status !== 'READY'}>
+            <button
+              type="button"
+              className="btn-primary"
+              onClick={startSession}
+              disabled={engine.status !== 'READY'}
+            >
               {t('startSession')}
             </button>
           ) : (
@@ -677,8 +922,12 @@ export function PoseTracker({ lang }: Props) {
               {t('stopEarly')} ({hud.secondsLeft}s)
             </button>
           )}
-          <button type="button" className={`btn-secondary ${metronomeOn ? 'on' : ''}`} onClick={toggleMetronome}>
-            {metronomeOn ? `■ ${t('metronomeOff')}` : `▶ ${t('metronomeOn')}`}
+          <button
+            type="button"
+            className={`btn-secondary ${metronomeOn ? 'on' : ''}`}
+            onClick={toggleMetronome}
+          >
+            {metronomeOn ? t('metronomeOff') : t('metronomeOn')}
           </button>
           <button
             type="button"
@@ -686,26 +935,47 @@ export function PoseTracker({ lang }: Props) {
             onClick={() => setShowGuide((v) => !v)}
           >
             {showGuide
-              ? (isEn ? '✕ Hide guide' : '✕ Ẩn hướng dẫn')
-              : (isEn ? '▶ Video guide' : '▶ Video hướng dẫn')}
+              ? isEn
+                ? '✕ Hide guide'
+                : '✕ Ẩn hướng dẫn'
+              : isEn
+                ? '▶ Video guide'
+                : '▶ Video hướng dẫn'}
           </button>
           <label className="check">
-            <input type="checkbox" checked={showCamera} onChange={(e) => setShowCamera(e.target.checked)} />
+            <input
+              type="checkbox"
+              checked={showCamera}
+              onChange={(e) => setShowCamera(e.target.checked)}
+            />
             {t('showCamera')}
           </label>
           <label className="check">
-            <input type="checkbox" checked={show3dMesh} onChange={(e) => setShow3dMesh(e.target.checked)} />
+            <input
+              type="checkbox"
+              checked={show3dMesh}
+              onChange={(e) => setShow3dMesh(e.target.checked)}
+            />
             {isEn ? '3D Arm Mesh' : 'Lưới 3D tay'}
           </label>
         </div>
       )}
 
       {practice && summary && <SummaryCard t={t} s={summary} />}
+
       {practice && showGuide && (
         <div className="guide-panel">
           <div className="guide-header">
-            <h4>{isEn ? 'Posture & camera setup guide' : 'Hướng dẫn tư thế & đặt camera'}</h4>
-            <button type="button" className="btn-close-guide" onClick={() => setShowGuide(false)}>
+            <h4>
+              {isEn
+                ? 'Posture & camera setup guide'
+                : 'Hướng dẫn tư thế & đặt camera'}
+            </h4>
+            <button
+              type="button"
+              className="btn-close-guide"
+              onClick={() => setShowGuide(false)}
+            >
               {isEn ? '✕ Close' : '✕ Đóng'}
             </button>
           </div>
@@ -717,31 +987,60 @@ export function PoseTracker({ lang }: Props) {
           />
           {isEn ? (
             <ul className="guide-tips">
-              <li><strong>Hand placement:</strong> Place the heel of one hand in the center of the chest (lower half of the breastbone), with your other hand interlocked on top.</li>
-              <li><strong>Posture:</strong> Keep your elbows locked straight and your shoulders positioned directly over your hands.</li>
-              <li><strong>Camera angle:</strong> Position the camera at a 90° side profile for the most accurate AI arm tracking.</li>
+              <li>
+                <strong>Hand placement:</strong> Place the heel of one hand in
+                the center of the chest (lower half of the breastbone), with
+                your other hand interlocked on top.
+              </li>
+              <li>
+                <strong>Posture:</strong> Keep your elbows locked straight and
+                your shoulders positioned directly over your hands.
+              </li>
+              <li>
+                <strong>Camera angle:</strong> Position the camera at a 90°
+                side profile for the most accurate AI arm tracking.
+              </li>
             </ul>
           ) : (
             <ul className="guide-tips">
-              <li><strong>Đặt tay:</strong> Gót bàn tay ở giữa ngực (1/2 dưới xương ức), đan hai tay vào nhau.</li>
-              <li><strong>Tư thế:</strong> Duỗi thẳng khuỷu tay, vai vuông góc thẳng trục với bàn tay.</li>
-              <li><strong>Góc camera:</strong> Đặt camera nhìn nghiêng 90° bên hông để AI nhận diện cánh tay chính xác nhất.</li>
+              <li>
+                <strong>Đặt tay:</strong> Gót bàn tay ở giữa ngực (1/2 dưới
+                xương ức), đan hai tay vào nhau.
+              </li>
+              <li>
+                <strong>Tư thế:</strong> Duỗi thẳng khuỷu tay, vai vuông góc
+                thẳng trục với bàn tay.
+              </li>
+              <li>
+                <strong>Góc camera:</strong> Đặt camera nhìn nghiêng 90° bên
+                hông để AI nhận diện cánh tay chính xác nhất.
+              </li>
             </ul>
           )}
         </div>
       )}
 
-      {engine.errorKey && <div className="banner error">{t(engine.errorKey)}</div>}
-      {engine.cpu && <div className="banner note">{t('noteCpuFallback')}</div>}
-      {audioMissing && <div className="banner note">{t('warnAudioMissing')}</div>}
-      {engine.status === 'READY' && hud.fps > 0 && hud.fps < 15 && <div className="banner note">{t('warnLowFps')}</div>}
+      {engine.errorKey && (
+        <div className="banner error">{t(engine.errorKey)}</div>
+      )}
+      {engine.cpu && (
+        <div className="banner note">{t('noteCpuFallback')}</div>
+      )}
+      {audioMissing && (
+        <div className="banner note">{t('warnAudioMissing')}</div>
+      )}
+      {engine.status === 'READY' && hud.fps > 0 && hud.fps < 15 && (
+        <div className="banner note">{t('warnLowFps')}</div>
+      )}
 
       <div className={`stage ${stageStatus}`}>
         <div className={`stage-badge ${badgeState}`}>
           <span className="badge-dot" />
           {badgeLabel}
         </div>
-        {engine.status === 'LOADING' && <div className="stage-loading">{t('loadingModel')}</div>}
+        {engine.status === 'LOADING' && (
+          <div className="stage-loading">{t('loadingModel')}</div>
+        )}
         <canvas ref={canvasRef} className="stage-canvas" />
         <video ref={videoRef} className="stage-video" playsInline muted />
         {hud.phase === 'COUNTDOWN' && (
@@ -756,6 +1055,7 @@ export function PoseTracker({ lang }: Props) {
           </div>
         )}
       </div>
+
       <div className="video-record-bar">
         {!isVideoRecording ? (
           <button
@@ -767,7 +1067,11 @@ export function PoseTracker({ lang }: Props) {
             {isEn ? '● Record video' : '● Bắt đầu ghi hình'}
           </button>
         ) : (
-          <button type="button" className="btn-stop" onClick={stopVideoRecording}>
+          <button
+            type="button"
+            className="btn-stop"
+            onClick={stopVideoRecording}
+          >
             {isEn ? '■ Stop & Review' : '■ Dừng & Xem lại'}
           </button>
         )}
@@ -778,7 +1082,11 @@ export function PoseTracker({ lang }: Props) {
           <h4>{isEn ? 'Recorded practice' : 'Video vừa tập'}</h4>
           <video src={recordedUrl} controls className="replay-video" />
           <div className="replay-actions">
-            <a href={recordedUrl} download={`cpr-practice-${Date.now()}.webm`} className="btn-download">
+            <a
+              href={recordedUrl}
+              download={`cpr-practice-${Date.now()}.webm`}
+              className="btn-download"
+            >
               {isEn ? 'Download video' : 'Tải video về máy'}
             </a>
             <button
@@ -800,21 +1108,29 @@ export function PoseTracker({ lang }: Props) {
           <div className="metric">
             <span className="metric-label">{t('hudRate')}</span>
             <span className={`metric-value big ${rateClass}`}>
-              {hud.bpm ?? '—'} <small>{t('hudBpmUnit')}</small>
+              {hud.bpm ?? '-'} <small>{t('hudBpmUnit')}</small>
             </span>
             <span className="metric-sub">
-              {t('hudTarget')}: {TARGET_BPM_MIN}–{TARGET_BPM_MAX}
+              {t('hudTarget')}: {TARGET_BPM_MIN}-{TARGET_BPM_MAX}
             </span>
           </div>
           {practice && (
             <>
               <div className="metric">
                 <span className="metric-label">{t('hudElbow')}</span>
-                <span className={`metric-value ${hud.posture === 'BENT_ELBOW' ? 'warn' : 'good'}`}>{hud.tracking ? `${hud.elbow}°` : '—'}</span>
+                <span
+                  className={`metric-value ${hud.posture === 'BENT_ELBOW' ? 'warn' : 'good'}`}
+                >
+                  {hud.tracking ? `${hud.elbow}°` : '-'}
+                </span>
               </div>
               <div className="metric">
                 <span className="metric-label">{t('hudOffset')}</span>
-                <span className={`metric-value ${hud.posture === 'OFF_AXIS' ? 'warn' : 'good'}`}>{hud.tracking ? hud.offset : '—'}</span>
+                <span
+                  className={`metric-value ${hud.posture === 'OFF_AXIS' ? 'warn' : 'good'}`}
+                >
+                  {hud.tracking ? hud.offset : '-'}
+                </span>
               </div>
             </>
           )}
@@ -825,19 +1141,30 @@ export function PoseTracker({ lang }: Props) {
         </div>
 
         {/* Thanh đo nhịp BPM trực quan (Live BPM Gauge) */}
-        <div className="bpm-gauge" aria-label="Live BPM Gauge">
+        <div
+          className="bpm-gauge"
+          aria-label={isEn ? 'Live BPM Gauge' : 'Thanh đo nhịp BPM trực tiếp'}
+        >
           <div className="bpm-track">
             <div
               className="bpm-target"
-              style={{ left: `${targetLeftPct}%`, width: `${targetWidthPct}%` }}
+              style={{
+                left: `${targetLeftPct}%`,
+                width: `${targetWidthPct}%`,
+              }}
             />
             {bpmPct !== null && (
-              <div className={`bpm-needle ${rateClass}`} style={{ left: `${bpmPct}%` }} />
+              <div
+                className={`bpm-needle ${rateClass}`}
+                style={{ left: `${bpmPct}%` }}
+              />
             )}
           </div>
           <div className="bpm-ticks">
             <span>{GAUGE_MIN}</span>
-            <span className="bpm-tick-target">{TARGET_BPM_MIN}–{TARGET_BPM_MAX} BPM</span>
+            <span className="bpm-tick-target">
+              {TARGET_BPM_MIN}-{TARGET_BPM_MAX} BPM
+            </span>
             <span>{GAUGE_MAX}</span>
           </div>
         </div>
@@ -854,7 +1181,14 @@ export function PoseTracker({ lang }: Props) {
             </div>
           )}
         </div>
-        {practice && <div className="hud-source">{usingModel ? t('hudClassifierModel') : t('hudClassifierThreshold')}</div>}
+
+        {practice && (
+          <div className="hud-source">
+            {usingModel
+              ? t('hudClassifierModel')
+              : t('hudClassifierThreshold')}
+          </div>
+        )}
       </div>
 
       {practice && (

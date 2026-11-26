@@ -7,7 +7,10 @@ export const ALL_CUES: CueId[] = ['faster', 'slower', 'straighten', 'shoulders']
 
 type AudioCtor = typeof AudioContext;
 function getCtor(): AudioCtor | undefined {
-  return window.AudioContext ?? (window as unknown as { webkitAudioContext?: AudioCtor }).webkitAudioContext;
+  return (
+    window.AudioContext ??
+    (window as unknown as { webkitAudioContext?: AudioCtor }).webkitAudioContext
+  );
 }
 
 export interface CueLoadReport {
@@ -15,21 +18,26 @@ export interface CueLoadReport {
   missing: CueId[];
 }
 
-/**
- * Âm thanh của ứng dụng:
- *  - Nhắc giọng nói: file thu sẵn public/audio/{vi|en}/{faster|slower|straighten|shoulders}.mp3,
- *    giải mã sẵn vào bộ nhớ (WebAudio) → độ trễ thấp, và sau khi người dùng bấm nút
- *    một lần thì iOS/Safari cho phép phát các lần sau.
- *  - Nếu thiếu file: dùng speechSynthesis làm DỰ PHÒNG và báo cho giao diện biết
- *    (trước đây lỗi này bị nuốt im lặng nên cảnh báo giọng nói không phát gì cả).
- *  - Metronome: sinh tiếng "tick" bằng WebAudio nên không cần file, chạy offline, đúng nhịp.
- */
 export class AudioCoach {
   private ctx: AudioContext | null = null;
   private buffers = new Map<string, AudioBuffer>();
   private metroTimer: number | null = null;
   private nextClick = 0;
   private metroBpm = 0;
+  private activeSource: AudioBufferSourceNode | null = null;
+  private speaking = false;
+  private onSpeakingChange?: (speaking: boolean) => void;
+
+  constructor(onSpeakingChange?: (speaking: boolean) => void) {
+    this.onSpeakingChange = onSpeakingChange;
+  }
+
+  private setSpeaking(next: boolean): void {
+    if (this.speaking !== next) {
+      this.speaking = next;
+      this.onSpeakingChange?.(next);
+    }
+  }
 
   private ensureCtx(): AudioContext | null {
     if (this.ctx) return this.ctx;
@@ -60,7 +68,6 @@ export class AudioCoach {
           if (!ctx) throw new Error('no AudioContext');
           const res = await fetch(asset(`audio/${lang}/${cue}.mp3`));
           const type = res.headers.get('content-type') ?? '';
-          // Vite dev trả index.html (200) cho file không tồn tại → phải loại trường hợp này
           if (!res.ok || type.includes('text/html')) throw new Error('missing');
           const buf = await ctx.decodeAudioData(await res.arrayBuffer());
           this.buffers.set(key, buf);
@@ -68,19 +75,39 @@ export class AudioCoach {
         } catch {
           missing.push(cue);
         }
-      }),
+      })
     );
     return { loaded, missing };
   }
 
   /** Trả về nguồn đã dùng để phát. */
-  playCue(cue: CueId, lang: Lang, fallbackText: string): 'file' | 'speech' | 'none' {
+  playCue(
+    cue: CueId,
+    lang: Lang,
+    fallbackText: string
+  ): 'file' | 'speech' | 'none' {
     const ctx = this.ctx;
     const buf = this.buffers.get(`${lang}/${cue}`);
     if (ctx && buf) {
+      if (this.activeSource) {
+        try {
+          this.activeSource.stop();
+        } catch {
+          /* bỏ qua nếu đã dừng */
+        }
+        this.activeSource = null;
+      }
       const src = ctx.createBufferSource();
       src.buffer = buf;
       src.connect(ctx.destination);
+      this.activeSource = src;
+      this.setSpeaking(true);
+      src.onended = () => {
+        if (this.activeSource === src) {
+          this.activeSource = null;
+          this.setSpeaking(false);
+        }
+      };
       src.start();
       return 'file';
     }
@@ -88,6 +115,9 @@ export class AudioCoach {
       window.speechSynthesis.cancel();
       const u = new SpeechSynthesisUtterance(fallbackText);
       u.lang = lang === 'vi' ? 'vi-VN' : 'en-US';
+      u.onstart = () => this.setSpeaking(true);
+      u.onend = () => this.setSpeaking(false);
+      u.onerror = () => this.setSpeaking(false);
       window.speechSynthesis.speak(u);
       return 'speech';
     }
@@ -104,7 +134,6 @@ export class AudioCoach {
     if (ctx.state === 'suspended') void ctx.resume();
     this.metroBpm = bpm;
     this.nextClick = ctx.currentTime + 0.08;
-    // Lập lịch trước ~120 ms bằng đồng hồ của WebAudio để nhịp không bị trôi theo setInterval
     this.metroTimer = window.setInterval(() => {
       while (this.nextClick < ctx.currentTime + 0.12) {
         this.click(ctx, this.nextClick);
@@ -136,6 +165,15 @@ export class AudioCoach {
 
   dispose(): void {
     this.stopMetronome();
+    if (this.activeSource) {
+      try {
+        this.activeSource.stop();
+      } catch {
+        /* bỏ qua */
+      }
+      this.activeSource = null;
+    }
+    this.setSpeaking(false);
     if ('speechSynthesis' in window) window.speechSynthesis.cancel();
     if (this.ctx) void this.ctx.close();
     this.ctx = null;
