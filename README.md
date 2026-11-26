@@ -4,9 +4,9 @@
 
 # LifeAssist CPR
 
-**Huấn luyện viên ép tim bằng AI cho học sinh và cộng đồng — chạy hoàn toàn trên trình duyệt, không gửi và không lưu video.**
+**An AI chest-compression coach for students and the community — runs entirely in the browser, with no video sent or stored.**
 
-*An on-device AI chest-compression coach. Real-time compression rate and arm-posture feedback from a single camera. No video leaves your device.*
+*Real-time compression-rate and arm-posture feedback from a single camera. No video leaves your device.*
 
 [![WAICY 2026](https://img.shields.io/badge/WAICY-2026%20AI%20Showcase-E11D48?style=flat-square)](https://waicy.org)
 [![React](https://img.shields.io/badge/React-19-61DAFB?style=flat-square&logo=react&logoColor=black)](https://react.dev/)
@@ -14,383 +14,383 @@
 [![Vite](https://img.shields.io/badge/Vite-8-646CFF?style=flat-square&logo=vite&logoColor=white)](https://vite.dev/)
 [![MediaPipe](https://img.shields.io/badge/MediaPipe-Pose%20%2B%20Hand-4285F4?style=flat-square&logo=google&logoColor=white)](https://ai.google.dev/edge/mediapipe/solutions/guide)
 [![Three.js](https://img.shields.io/badge/Three.js-3D%20overlay-000000?style=flat-square&logo=threedotjs&logoColor=white)](https://threejs.org/)
-[![PWA](https://img.shields.io/badge/PWA-installable-5A0FC8?style=flat-square&logo=pwa&logoColor=white)](#8-pwa--chạy-offline)
-[![Privacy](https://img.shields.io/badge/Video-never%20uploaded-16A34A?style=flat-square)](#7-quyền-riêng-tư)
-[![Status](https://img.shields.io/badge/Status-Prototype%20v0.2.0-F59E0B?style=flat-square)](#10-trạng-thái-trung-thực-và-giới-hạn)
+[![PWA](https://img.shields.io/badge/PWA-installable-5A0FC8?style=flat-square&logo=pwa&logoColor=white)](#8-pwa--offline)
+[![Privacy](https://img.shields.io/badge/Video-never%20uploaded-16A34A?style=flat-square)](#7-privacy)
+[![Status](https://img.shields.io/badge/Status-Prototype%20v0.2.0-F59E0B?style=flat-square)](#10-honest-status--limitations)
 
-[🚀 Chạy thử](#5-chạy-thử) • [✨ Tính năng](#2-tính-năng) • [🧠 Thuật toán](#3-cách-hoạt-động) • [🏗️ Cấu trúc](#4-cấu-trúc-dự-án) • [🔒 Riêng tư](#7-quyền-riêng-tư) • [⚠️ Giới hạn](#10-trạng-thái-trung-thực-và-giới-hạn)
+[🚀 Quick Start](#5-quick-start) • [✨ Features](#2-features) • [🧠 Algorithms](#3-how-it-works) • [🏗️ Structure](#4-project-structure) • [🔒 Privacy](#7-privacy) • [⚠️ Limitations](#10-honest-status--limitations)
 
 </div>
 
 ---
 
 > [!WARNING]
-> **LifeAssist CPR là công cụ hỗ trợ _luyện tập_ nhịp ép và tư thế tay từ góc nhìn nghiêng 2D.**
-> Ứng dụng **không đo được độ sâu ép** (5–6 cm), **không chẩn đoán** và **không thay thế** nhân viên y tế hay khoá học CPR có chứng chỉ.
-> Trong tình huống thật: **gọi 115 ngay**.
+> **LifeAssist CPR is a tool for _practising_ compression rate and arm posture from a 2D side view.**
+> It **cannot measure compression depth** (5–6 cm), **does not diagnose**, and **does not replace** medical professionals or a certified CPR course.
+> In a real emergency: **call 115 immediately**.
 
 ---
 
-## 1. Giới thiệu
+## 1. Overview
 
-Ngừng tim có thể xảy ra với bất kỳ ai, ở bất kỳ đâu, và ép tim sớm, đúng nhịp là việc người ngoài ngành y có thể làm được. Nhưng để làm đúng thì cần **luyện tập có phản hồi**, trong khi đa số người học chỉ xem video hoặc tập với người hướng dẫn trong thời gian ngắn.
+Cardiac arrest can happen to anyone, anywhere, and early, correctly paced chest compressions are something non-medical people can do. But doing them well takes **practice with feedback**, while most learners only watch a video or practise briefly with an instructor.
 
-**LifeAssist CPR** biến chiếc điện thoại hoặc laptop thành một huấn luyện viên: đặt camera nhìn nghiêng, ép tim lên gối hoặc manikin, và ứng dụng cho biết ngay **bạn ép nhanh hay chậm** và **tay, vai có đúng tư thế không** bằng cả chữ lẫn giọng nói.
+**LifeAssist CPR** turns a phone or laptop into a coach: place the camera at the side, compress on a pillow or manikin, and the app tells you right away **whether you are compressing too fast or too slow** and **whether your arms and shoulders are in the right position**, in both text and voice.
 
-| Nguyên tắc | Ý nghĩa |
+| Principle | Meaning |
 | :--- | :--- |
-| 🔒 **Riêng tư từ thiết kế** | Mô hình AI chạy ngay trong trình duyệt. Không có máy chủ nhận video, không có tài khoản. |
-| 🎯 **Trung thực về số liệu** | Con số nào chưa đo thật thì không tuyên bố. Xem [mục 10](#10-trạng-thái-trung-thực-và-giới-hạn). |
-| 🚨 **Khẩn cấp là ưu tiên** | Chế độ Khẩn cấp tối giản: nút gọi 115, metronome 110 BPM và 4 bước hướng dẫn. |
-| 🌏 **Song ngữ** | Toàn bộ giao diện và giọng nhắc có tiếng Việt và tiếng Anh. |
+| 🔒 **Private by design** | The AI model runs inside the browser. No server receives video, and there are no accounts. |
+| 🎯 **Honest about numbers** | Any figure that has not been measured on real data is not claimed. See [Section 10](#10-honest-status--limitations). |
+| 🚨 **Emergency first** | A minimal Emergency mode: a call-115 button, a 110 BPM metronome and 4 guidance steps. |
+| 🌏 **Bilingual** | The whole interface and the voice cues are available in Vietnamese and English. |
 
 ---
 
-## 2. Tính năng
+## 2. Features
 
-### 2.1 Chế độ Luyện tập
+### 2.1 Practice mode
 
-| Tính năng | Chi tiết |
+| Feature | Details |
 | :--- | :--- |
-| **Bài tập 30 giây** | Đếm ngược 3-2-1, sau đó ép liên tục 30 giây. Có nút dừng sớm. |
-| **Đo nhịp ép theo thời gian thực** | Hiển thị số lần/phút, so với mục tiêu **100–120 lần/phút** (AHA 2025). |
-| **Đo tư thế tay** | Góc khuỷu tay (vai–khuỷu–cổ tay) và độ lệch ngang giữa vai và cổ tay, chuẩn hoá theo chiều dài thân. |
-| **Phản hồi hai dòng riêng** | Nhịp và tư thế hiển thị tách biệt, không ghi đè lẫn nhau. |
-| **Nhắc bằng giọng nói** | 4 câu thu sẵn (VI/EN): *ép nhanh hơn · ép chậm lại · duỗi thẳng tay · đưa vai lên trên hai tay*. Hệ thống chọn câu "lâu chưa nghe nhất" nên lỗi tư thế vẫn được nhắc khi nhịp đang sai. |
-| **Metronome 110 BPM** | Tiếng tick sinh bằng WebAudio, đúng nhịp, không cần file âm thanh. |
-| **Bảng kết quả** | Tổng số lần ép, nhịp trung bình, % thời gian đạt 100–120/phút, % thời gian tư thế tốt, % thời gian thực sự ép và **lỗi chính**. |
-| **Chấm điểm công bằng** | Chỉ tính những lúc đang ép (3 giây vào tư thế đầu phiên không kéo điểm xuống). Ép chưa đủ 5 giây thì **không in phần trăm** thay vì in con số vô nghĩa. |
-| **Video hướng dẫn** | Video tư thế và cách đặt camera nhìn nghiêng 90°. |
-| **Lớp phủ 3D** | Khung dây cánh tay và bàn tay (Three.js) bám theo chuyển động thật. |
+| **30-second session** | A 3-2-1 countdown, then 30 seconds of continuous compressions. An early-stop button is available. |
+| **Real-time rate measurement** | Shows compressions per minute against the **100–120 per minute** target (AHA 2025). |
+| **Arm-posture measurement** | Elbow angle (shoulder–elbow–wrist) and horizontal shoulder-to-wrist offset, normalised by torso length. |
+| **Two separate feedback lines** | Rate and posture are shown independently and never overwrite each other. |
+| **Voice cues** | 4 pre-recorded phrases (VI/EN): *push faster · slow down · straighten your arms · shoulders over your hands*. The app picks the cue "heard least recently", so a posture error is still announced while the rate is also wrong. |
+| **110 BPM metronome** | A tick generated with WebAudio, accurately timed, no audio file needed. |
+| **Results card** | Total compressions, average rate, % of time within 100–120/min, % of time with good posture, % of time actually compressing, and the **main issue**. |
+| **Fair scoring** | Only the moments when you are compressing count (the 3 seconds of getting into position do not drag the score down). With less than 5 seconds of compressions, the app **prints no percentages** rather than a meaningless number. |
+| **Guide video** | A video on posture and placing the camera at a 90° side view. |
+| **3D overlay** | A wireframe of the arm and hand (Three.js) that follows real movement. |
 
-### 2.2 Chế độ Khẩn cấp (tối giản)
+### 2.2 Emergency mode (minimal)
 
-- **Nút gọi cấp cứu 115** (`tel:115`) ở vị trí nổi bật nhất.
-- **Metronome 110 BPM** bật bằng một chạm, chạy được khi không có mạng.
-- **4 bước CPR chỉ ép tim cho người lớn**, dẫn nguồn AHA 2025 Phần 7 kèm lời nhắc tự đối chiếu tài liệu gốc.
+- A **call-115 emergency button** (`tel:115`) in the most prominent position.
+- A **110 BPM metronome** you can start with one tap, which works without a network connection.
+- **4 hands-only CPR steps for adults**, citing AHA 2025 Part 7 and reminding users to check the original document.
 
-### 2.3 Công cụ cho nhóm nghiên cứu
+### 2.3 Tools for the research team
 
-- **Thu dữ liệu** xuất CSV 16 cột chỉ chứa *toạ độ khớp dạng số* (không có hình, không có âm thanh).
-- Người thứ hai bấm **phím Cách** theo từng nhịp ép làm **chuẩn đối chiếu độc lập** (`gt_tap`).
-- Hai script Python huấn luyện bộ phân loại tư thế và đo sai số BPM, **chia train/test theo người** (không rò rỉ dữ liệu).
+- **Data recording** exports a 16-column CSV containing only *numeric joint coordinates* (no images, no audio).
+- A second person presses the **Space bar** on every compression to provide an **independent ground truth** (`gt_tap`).
+- Two Python scripts train the posture classifier and measure BPM error, **splitting train/test by person** (no data leakage).
 
-### 2.4 Độ bền khi chạy thực tế
+### 2.4 Robustness in real use
 
-| Tình huống | Cách xử lý |
+| Situation | Handling |
 | :--- | :--- |
-| GPU không khả dụng | Tự chuyển sang CPU và báo cho người dùng. |
-| Mô hình *full* không nạp được | Hạ xuống mô hình *lite*. |
-| Camera bị từ chối, không có camera, trang không phải https | Mỗi lỗi có thông báo riêng, không gộp chung. |
-| Thiếu file giọng nói | Dùng giọng máy dự phòng và hiện cảnh báo vàng (không im lặng). |
-| FPS thấp (< 15) | Cảnh báo rằng kết quả đo nhịp có thể kém chính xác. |
-| Mất dấu tay | Bộ đếm nhịp reset trạng thái, toạ độ nhảy lung tung không bị đếm thành nhịp ép. |
+| GPU unavailable | Automatically falls back to CPU and tells the user. |
+| *Full* model fails to load | Falls back to the *lite* model. |
+| Camera denied, no camera, or page not served over https | Each error has its own message and is never lumped together. |
+| Voice files missing | Uses a fallback synthetic voice and shows a yellow warning (never silent). |
+| Low FPS (< 15) | Warns that the rate measurement may be less accurate. |
+| Hand tracking lost | The rate counter resets its state, so jumping coordinates are not counted as compressions. |
 
 ---
 
-## 3. Cách hoạt động
+## 3. How It Works
 
 ```mermaid
 flowchart LR
-    CAM["📷 Camera<br/>(video không rời thiết bị)"] --> MP["MediaPipe<br/>Pose + Hand Landmarker"]
-    MP --> SEL["Chọn tay đo<br/>(có độ trễ chọn)"]
-    SEL --> M["Đặc trưng<br/>góc khuỷu · lệch vai–cổ tay · độ cao cổ tay"]
-    M --> D["CprDetector<br/>làm mượt EMA + tìm đỉnh hysteresis"]
-    M --> P["Phân loại tư thế<br/>ngưỡng cố định / mô hình đội huấn luyện"]
-    D --> S["SessionScorer<br/>chấm điểm theo thời gian"]
+    CAM["📷 Camera<br/>(video never leaves the device)"] --> MP["MediaPipe<br/>Pose + Hand Landmarker"]
+    MP --> SEL["Choose measured arm<br/>(with selection hysteresis)"]
+    SEL --> M["Features<br/>elbow angle · shoulder–wrist offset · wrist height"]
+    M --> D["CprDetector<br/>EMA smoothing + hysteresis peak finding"]
+    M --> P["Posture classifier<br/>fixed thresholds / team-trained model"]
+    D --> S["SessionScorer<br/>time-based scoring"]
     P --> S
-    D --> FB["💬 Phản hồi chữ + 🔊 giọng nói"]
+    D --> FB["💬 Text feedback + 🔊 voice cues"]
     P --> FB
-    S --> SUM["📊 Bảng kết quả 30 giây"]
+    S --> SUM["📊 30-second results card"]
 ```
 
-### 3.1 Bộ đếm nhịp ép (`src/lib/cprDetector.ts`, đội tự viết)
+### 3.1 Compression-rate counter (`src/lib/cprDetector.ts`, written by the team)
 
-Tín hiệu vào là **độ cao cổ tay so với hông, chuẩn hoá theo chiều dài thân** để không phụ thuộc khoảng cách tới camera.
+The input signal is the **wrist height relative to the hip, normalised by torso length**, so it does not depend on the distance to the camera.
 
-1. **Làm mượt theo thời gian (ms), không theo số khung hình.** Bộ lọc EMA với `α = 1 − e^(−Δt/τ)` nên độ nhạy không phụ thuộc FPS của máy.
-2. **Tìm đỉnh có hysteresis.** Một lần ép chỉ được tính khi tín hiệu tăng ít nhất `minProminence` so với đáy trước rồi giảm ít nhất `minProminence` so với đỉnh.
-3. **Tính nhịp trên cửa sổ trượt 6 giây:** `BPM = (số đỉnh − 1) × 60 000 / khoảng thời gian`.
-4. **Loại nhiễu:** bỏ đỉnh sát nhau dưới 270 ms, bỏ nhịp ngoài khoảng 40–200, coi là ngừng ép nếu 2 giây không có đỉnh mới.
+1. **Smoothing over time (ms), not over frames.** An EMA filter with `α = 1 − e^(−Δt/τ)` keeps the sensitivity independent of the device's FPS.
+2. **Peak detection with hysteresis.** A compression is counted only when the signal rises by at least `minProminence` above the previous trough and then falls by at least `minProminence` from the peak.
+3. **Rate over a 6-second sliding window:** `BPM = (peaks − 1) × 60 000 / elapsed time`.
+4. **Noise rejection:** peaks closer than 270 ms are dropped, rates outside 40–200 are ignored, and compressions are considered stopped if no new peak appears for 2 seconds.
 
-Lớp này **không phụ thuộc React hay MediaPipe**, nên kiểm thử được bằng Node thuần.
+This class **does not depend on React or MediaPipe**, so it can be tested with plain Node.
 
-### 3.2 Đặc trưng tư thế (`src/lib/posture.ts`)
+### 3.2 Posture features (`src/lib/posture.ts`)
 
-| Đặc trưng | Công thức | Ý nghĩa |
+| Feature | Formula | Meaning |
 | :--- | :--- | :--- |
-| `elbowAngleDeg` | góc tại khuỷu của tam giác vai–khuỷu–cổ tay (đã bù tỉ lệ khung hình) | 180° = tay thẳng |
-| `offsetNorm` | `|x vai − x cổ tay| / chiều dài thân` | 0 = vai ngay trên cổ tay |
-| `wristYNorm` | `(y cổ tay − y hông) / chiều dài thân` | tín hiệu đưa vào bộ đếm nhịp |
+| `elbowAngleDeg` | angle at the elbow of the shoulder–elbow–wrist triangle (aspect-ratio corrected) | 180° = straight arm |
+| `offsetNorm` | `|shoulder x − wrist x| / torso length` | 0 = shoulder directly above the wrist |
+| `wristYNorm` | `(wrist y − hip y) / torso length` | signal fed to the rate counter |
 
-Ba nhãn tư thế: `CORRECT_POSTURE` · `BENT_ELBOW` · `OFF_AXIS`. Khi cả hai lỗi cùng xảy ra, ứng dụng báo **gập khuỷu** trước vì dễ sửa hơn và ảnh hưởng nhiều hơn.
+Three posture labels: `CORRECT_POSTURE` · `BENT_ELBOW` · `OFF_AXIS`. When both errors occur together, the app reports **bent elbow** first because it is easier to fix and has more impact.
 
-### 3.3 Các hằng số (`src/lib/config.ts`)
+### 3.3 Constants (`src/lib/config.ts`)
 
-| Hằng số | Giá trị | Nguồn / trạng thái |
+| Constant | Value | Source / status |
 | :--- | :---: | :--- |
-| Nhịp mục tiêu | 100–120 lần/phút | AHA 2025, Phần 7 |
-| Metronome Khẩn cấp | 110 BPM | Nằm giữa khoảng mục tiêu |
-| `ELBOW_MIN_DEG` | 160° | ⚠️ **Con số ước đoán**, chưa hiệu chỉnh từ dữ liệu |
-| `SHOULDER_OFFSET_MAX` | 0,28 | ⚠️ **Con số ước đoán**, chưa hiệu chỉnh từ dữ liệu |
-| `minProminence` | 0,04 | ⚠️ **Con số ước đoán**, chưa hiệu chỉnh từ dữ liệu |
-| Độ hiển thị tối thiểu | 0,5 | Khung hình thấp hơn bị loại |
-| Phiên tập | 30 s (+ đếm ngược 3 s) | |
-| Dữ liệu tối thiểu để in % | 5 s ép | Dưới mức này không in phần trăm |
+| Target rate | 100–120 per minute | AHA 2025, Part 7 |
+| Emergency metronome | 110 BPM | Midpoint of the target range |
+| `ELBOW_MIN_DEG` | 160° | ⚠️ **Estimated value**, not yet calibrated on data |
+| `SHOULDER_OFFSET_MAX` | 0.28 | ⚠️ **Estimated value**, not yet calibrated on data |
+| `minProminence` | 0.04 | ⚠️ **Estimated value**, not yet calibrated on data |
+| Minimum visibility | 0.5 | Frames below this are discarded |
+| Session | 30 s (+ 3 s countdown) | |
+| Minimum data to print % | 5 s of compressions | Below this, no percentages are printed |
 
-### 3.4 Mô hình AI
+### 3.4 AI models
 
-[MediaPipe Pose Landmarker](https://ai.google.dev/edge/mediapipe/solutions/vision/pose_landmarker) và Hand Landmarker là **mô hình có sẵn của Google, đội không huấn luyện chúng**. Phần do đội tự viết gồm: bộ đếm nhịp, các đặc trưng tư thế, bộ chấm điểm, logic phản hồi, và bộ công cụ thu dữ liệu / huấn luyện phân loại tư thế.
+[MediaPipe Pose Landmarker](https://ai.google.dev/edge/mediapipe/solutions/vision/pose_landmarker) and Hand Landmarker are **off-the-shelf Google models; the team did not train them**. The parts the team wrote are: the rate counter, the posture features, the scorer, the feedback logic, and the data-collection / posture-classifier training toolkit.
 
 ---
 
-## 4. Cấu trúc dự án
+## 4. Project Structure
 
 ```text
 .
 ├── src/
-│   ├── App.tsx                      # Vỏ ứng dụng, chuyển ngôn ngữ VI / EN
-│   ├── i18n.ts                      # Toàn bộ chuỗi giao diện song ngữ
+│   ├── App.tsx                      # App shell, VI / EN language switch
+│   ├── i18n.ts                      # All bilingual UI strings
 │   ├── components/
-│   │   ├── PoseTracker.tsx          # Camera, vòng lặp nhận diện, HUD, phiên tập
-│   │   ├── EmergencyPanel.tsx       # Chế độ Khẩn cấp: gọi 115, metronome, 4 bước
-│   │   ├── SummaryCard.tsx          # Bảng kết quả cuối phiên
-│   │   └── RecorderPanel.tsx        # Thu dữ liệu CSV cho nhóm nghiên cứu
+│   │   ├── PoseTracker.tsx          # Camera, detection loop, HUD, practice session
+│   │   ├── EmergencyPanel.tsx       # Emergency mode: call 115, metronome, 4 steps
+│   │   ├── SummaryCard.tsx          # End-of-session results card
+│   │   └── RecorderPanel.tsx        # CSV data recording for the research team
 │   ├── lib/
-│   │   ├── cprDetector.ts           # ⭐ Đếm nhịp ép (EMA theo ms + đỉnh hysteresis)
-│   │   ├── posture.ts               # Góc khuỷu, độ lệch vai–cổ tay, chọn tay, baseline ngưỡng
-│   │   ├── postureModel.ts          # Nạp bộ phân loại đội huấn luyện nếu có
-│   │   ├── sessionScorer.ts         # Chấm điểm phiên theo thời gian
-│   │   ├── audio.ts                 # Giọng nói thu sẵn + metronome WebAudio
-│   │   ├── csvRecorder.ts           # Xuất CSV toạ độ khớp (không có hình ảnh)
-│   │   ├── config.ts                # Mọi hằng số "con số" của hệ thống
-│   │   └── assets.ts                # Đường dẫn tài nguyên đúng cả khi triển khai ở thư mục con
-│   ├── tracking/                    # Theo dõi hai tay + lớp phủ khung dây 3D (Three.js)
-│   └── model/                       # posture_lr.json (chỉ có sau khi huấn luyện từ dữ liệu thật)
+│   │   ├── cprDetector.ts           # ⭐ Compression counter (time-based EMA + hysteresis peaks)
+│   │   ├── posture.ts               # Elbow angle, shoulder–wrist offset, arm selection, threshold baseline
+│   │   ├── postureModel.ts          # Loads the team-trained classifier if present
+│   │   ├── sessionScorer.ts         # Time-based session scoring
+│   │   ├── audio.ts                 # Pre-recorded voice + WebAudio metronome
+│   │   ├── csvRecorder.ts           # Joint-coordinate CSV export (no images)
+│   │   ├── config.ts                # Every "magic number" of the system
+│   │   └── assets.ts                # Asset paths that also work when deployed in a sub-folder
+│   ├── tracking/                    # Two-arm tracking + 3D wireframe overlay (Three.js)
+│   └── model/                       # posture_lr.json (only exists after training on real data)
 ├── public/
-│   ├── mediapipe/                   # Mô hình .task + wasm, chạy cục bộ (không gọi CDN)
+│   ├── mediapipe/                   # .task models + wasm, served locally (no CDN calls)
 │   ├── audio/{vi,en}/               # faster · slower · straighten · shoulders (.mp3)
-│   ├── icons/                       # Icon PWA 192 / 512 / maskable
-│   └── cpr-guide.mp4                # Video hướng dẫn tư thế và đặt camera
-├── ml/                              # Python: huấn luyện + đánh giá (leave-one-person-out)
+│   ├── icons/                       # PWA icons 192 / 512 / maskable
+│   └── cpr-guide.mp4                # Posture and camera-placement guide video
+├── ml/                              # Python: training + evaluation (leave-one-person-out)
 │   ├── train_classifier.py
 │   ├── eval_bpm.py
-│   ├── make_synthetic_demo.py       # Dữ liệu GIẢ, chỉ để thử đường ống
-│   └── data/                        # Dữ liệu người tham gia (bị .gitignore)
+│   ├── make_synthetic_demo.py       # SYNTHETIC data, only for trying the pipeline
+│   └── data/                        # Participant data (git-ignored)
 ├── tools/
-│   ├── check-assets.mjs             # Kiểm tra file bắt buộc
-│   ├── test-detector.ts             # Kiểm thử bộ đếm nhịp bằng tín hiệu giả lập
-│   └── test-lib.ts                  # 26 kiểm tra đơn vị
-└── docs/                            # Quy trình thu dữ liệu, thu âm, thử offline, nguồn y khoa
+│   ├── check-assets.mjs             # Checks required files
+│   ├── test-detector.ts             # Tests the rate counter with simulated signals
+│   └── test-lib.ts                  # 26 unit checks
+└── docs/                            # Data collection, audio recording, offline test, medical sources
 ```
 
 ---
 
-## 5. Chạy thử
+## 5. Quick Start
 
-### 5.1 Yêu cầu
+### 5.1 Requirements
 
-- **Node.js** 22 trở lên (cần cho `--experimental-strip-types` khi chạy kiểm thử)
-- Trình duyệt hiện đại có camera (Chrome, Edge, Safari, Firefox)
+- **Node.js** 22 or newer (needed for `--experimental-strip-types` when running the tests)
+- A modern browser with a camera (Chrome, Edge, Safari, Firefox)
 
-### 5.2 Cài đặt và chạy
+### 5.2 Install and run
 
 ```bash
 npm ci
-npm run check:assets    # kiểm tra file bắt buộc (mô hình, icon, giọng nói)
-npm run test:detector   # kiểm thử thuật toán đếm nhịp bằng tín hiệu giả lập
+npm run check:assets    # check required files (models, icons, voice cues)
+npm run test:detector   # test the rate counter with simulated signals
 npm run dev             # http://localhost:5173
 ```
 
 ```bash
-npm run build && npm run preview   # bản production
+npm run build && npm run preview   # production build
 ```
 
 > [!IMPORTANT]
-> **Camera chỉ hoạt động trên `https://` hoặc `localhost`.**
-> Để thử trên điện thoại, hãy mở bản đã triển khai qua https. Mở bằng `http://192.168.x.x` sẽ **không** bật được camera.
+> **The camera only works on `https://` or `localhost`.**
+> To try it on a phone, open the deployed https version. Opening `http://192.168.x.x` will **not** enable the camera.
 
-### 5.3 Các lệnh npm
+### 5.3 npm scripts
 
-| Lệnh | Tác dụng |
+| Command | Purpose |
 | :--- | :--- |
-| `npm run dev` | Chạy máy chủ phát triển (Vite) |
-| `npm run build` | Kiểm tra kiểu (`tsc -b`) rồi build production |
-| `npm run preview` | Xem thử bản build |
-| `npm run lint` | Kiểm tra mã bằng oxlint |
-| `npm run check:assets` | Kiểm tra mô hình, icon, 8 file giọng nói |
-| `npm run test:detector` | Kiểm thử bộ đếm nhịp (FPS 15/30/60, 90–140 BPM, nhiễu, rơi khung, mất dấu tay) |
+| `npm run dev` | Start the development server (Vite) |
+| `npm run build` | Type-check (`tsc -b`) then build for production |
+| `npm run preview` | Preview the production build |
+| `npm run lint` | Lint the code with oxlint |
+| `npm run check:assets` | Check models, icons and the 8 voice files |
+| `npm run test:detector` | Test the rate counter (15/30/60 FPS, 90–140 BPM, noise, dropped frames, lost hand tracking) |
 
-Kiểm thử đơn vị chạy riêng: `node --experimental-strip-types tools/test-lib.ts`.
+Run the unit tests separately with: `node --experimental-strip-types tools/test-lib.ts`.
 
-### 5.4 Triển khai
+### 5.4 Deployment
 
-Dự án là một trang tĩnh, triển khai được lên Vercel, Netlify hoặc GitHub Pages. Mọi đường dẫn tài nguyên đều dùng `import.meta.env.BASE_URL` nên hoạt động đúng cả khi đặt ở thư mục con (ví dụ `/ten-repo/`). Hãy bảo đảm bản triển khai chạy trên **https**.
+The project is a static site that can be deployed to Vercel, Netlify or GitHub Pages. Every asset path uses `import.meta.env.BASE_URL`, so it works correctly even in a sub-folder (for example `/repo-name/`). Make sure the deployment is served over **https**.
 
 ---
 
-## 6. Quy trình dữ liệu và huấn luyện
+## 6. Data and Training Workflow
 
-Mục tiêu: (1) hiệu chỉnh bộ phân loại tư thế từ dữ liệu thật, (2) đo sai số đếm nhịp so với nhịp ép thật.
+Goals: (1) calibrate the posture classifier on real data, and (2) measure the rate-counting error against the true compression rate.
 
 ```bash
 pip install -r ml/requirements.txt
 
-python ml/eval_bpm.py --data ml/data           # sai số BPM so với gt_tap  → ml/results/bpm_eval.md
-python ml/train_classifier.py --data ml/data   # LOPO + baseline ngưỡng    → ml/results/posture_eval.md
+python ml/eval_bpm.py --data ml/data           # BPM error vs gt_tap       → ml/results/bpm_eval.md
+python ml/train_classifier.py --data ml/data   # LOPO + threshold baseline → ml/results/posture_eval.md
                                                #                           → src/model/posture_lr.json
 ```
 
-| Nguyên tắc | Cách thực hiện |
+| Principle | How it is done |
 | :--- | :--- |
-| **Không rò rỉ dữ liệu** | Chia train/test **theo người** (leave-one-person-out), không theo khung hình. |
-| **Luôn có baseline** | Mô hình hồi quy logistic luôn được so với ngưỡng cố định đang dùng trong app, kể cả khi hai bên ngang nhau. |
-| **Báo cáo đầy đủ** | Trung bình ± độ lệch giữa các người, bảng theo góc máy / ánh sáng / thiết bị, ma trận nhầm lẫn, người khó nhất. |
-| **Từ chối xuất mô hình sớm** | Hai script không xuất mô hình vào app nếu dữ liệu là `SYNTHETIC_` hoặc có ít hơn **6 người**. |
-| **Chuẩn đối chiếu độc lập** | Nhịp thật là phím Cách do người thứ hai bấm, **không** dùng tiếng bíp metronome. |
+| **No data leakage** | Train/test split **by person** (leave-one-person-out), never by frame. |
+| **Always a baseline** | The logistic-regression model is always compared with the fixed-threshold classifier used in the app, even when the two are equal. |
+| **Complete reporting** | Mean ± spread across people, tables by camera angle / lighting / device, confusion matrix, hardest participant. |
+| **Refuses premature export** | Both scripts refuse to export a model into the app if the data is `SYNTHETIC_` or has fewer than **6 people**. |
+| **Independent ground truth** | The true rate is the Space-bar presses by a second person, **never** the metronome beep. |
 
-Khi có `src/model/posture_lr.json`, giao diện tự đổi dòng *"Phân loại: ngưỡng cố định"* thành *"Phân loại: mô hình do đội huấn luyện"*.
+When `src/model/posture_lr.json` exists, the UI automatically changes the line *"Classifier: fixed thresholds"* to *"Classifier: team-trained model"*.
 
-Chi tiết cách bố trí camera, nhãn tư thế, phiếu đồng ý của phụ huynh và các điều không được làm: [`docs/DATA_COLLECTION.md`](./docs/DATA_COLLECTION.md).
+For camera placement, posture labels, the parental consent form and the list of things you must not do, see [`docs/DATA_COLLECTION.md`](./docs/DATA_COLLECTION.md).
 
 ---
 
-## 7. Quyền riêng tư
+## 7. Privacy
 
-| Vấn đề | Cách xử lý |
+| Topic | How it is handled |
 | :--- | :--- |
-| **Video** | Xử lý hoàn toàn trên thiết bị. Không gửi đi đâu, không lưu. |
-| **Dữ liệu thu thập** | Chỉ khi người dùng chủ động bấm ghi: **toạ độ khớp dạng số**, tải về dưới dạng CSV. Không có hình, không có âm thanh, không có khuôn mặt. |
-| **Danh tính** | Dữ liệu gắn **mã ẩn danh** (S01, S02, …). Bảng đối chiếu mã ↔ tên không nằm trong repo. |
-| **Người tham gia là trẻ vị thành niên** | Cần phiếu đồng ý của phụ huynh. Thư mục `ml/data/*` nằm trong `.gitignore`, **không được đưa lên GitHub công khai**. |
-| **Tài khoản / máy chủ** | Không có. |
+| **Video** | Processed entirely on the device. Never sent anywhere, never stored. |
+| **Collected data** | Only when the user explicitly starts recording: **numeric joint coordinates**, downloaded as a CSV. No images, no audio, no faces. |
+| **Identity** | Data is tagged with an **anonymous code** (S01, S02, …). The code ↔ name table is not in the repo. |
+| **Participants who are minors** | Parental consent is required. `ml/data/*` is in `.gitignore` and **must not be pushed to a public GitHub repository**. |
+| **Accounts / servers** | None. |
 
 ---
 
-## 8. PWA và chạy offline
+## 8. PWA & Offline
 
-Ứng dụng có manifest, icon (192 / 512 / maskable) và service worker (`vite-plugin-pwa`) cache mô hình, wasm và file giọng nói (khoảng 35 MB) để cài lên màn hình chính.
+The app has a manifest, icons (192 / 512 / maskable) and a service worker (`vite-plugin-pwa`) that caches the models, wasm and voice files (about 35 MB) so it can be installed to the home screen.
 
 > [!NOTE]
-> Cấu hình cache đã sẵn sàng, nhưng **khả năng chạy hoàn toàn offline chưa được kiểm chứng trên điện thoại thật**. Quy trình thử bằng chế độ máy bay có trong [`docs/OFFLINE_TEST.md`](./docs/OFFLINE_TEST.md). Chỉ nên gọi là "chạy offline" sau khi đạt đủ các bước ở đó.
+> The cache configuration is in place, but **fully offline operation has not yet been verified on a real phone**. The airplane-mode test procedure is in [`docs/OFFLINE_TEST.md`](./docs/OFFLINE_TEST.md). Only say "works offline" after passing every step there.
 
 ---
 
-## 9. Hướng dẫn nhanh cho người dùng
+## 9. Quick User Guide
 
-1. Đặt camera **ngang hông, nhìn nghiêng 90°**, cách khoảng 1,5 m, sao cho thấy rõ **vai, khuỷu tay, cổ tay và hông** cùng một bên.
-2. Mặc đồ ôm (áo rộng làm tăng sai số) và ép lên **gối hoặc manikin**, không ép lên người thật.
-3. Chọn **Luyện tập** → *Bắt đầu bài tập 30 giây* → vào tư thế trong lúc đếm ngược.
-4. Làm theo nhắc nhở: nhịp **100–120 lần/phút**, **khuỷu tay thẳng**, **vai ngay trên cổ tay**.
-5. Xem bảng kết quả và lỗi chính, rồi tập lại.
+1. Place the camera **at hip height, in a 90° side view**, about 1.5 m away, so that the **shoulder, elbow, wrist and hip** on the same side are clearly visible.
+2. Wear fitted clothing (loose clothing increases error) and compress on a **pillow or manikin**, never on a real person.
+3. Choose **Practice** → *Start 30-second session* → get into position during the countdown.
+4. Follow the prompts: a rate of **100–120 per minute**, **straight elbows**, and **shoulders directly above your wrists**.
+5. Read the results card and the main issue, then practise again.
 
 ---
 
-## 10. Trạng thái trung thực và giới hạn
+## 10. Honest Status & Limitations
 
-Đây là **prototype v0.2.0**. Nhóm ghi rõ điều đã kiểm chứng và chưa kiểm chứng để người đọc không bị dẫn dắt sai.
+This is a **prototype, v0.2.0**. The team states what is and is not verified so that readers are not misled.
 
-### ✅ Đã kiểm chứng
+### ✅ Verified
 
-| Nội dung | Kết quả |
+| Item | Result |
 | :--- | :--- |
-| Bộ đếm nhịp trên **tín hiệu giả lập** (15 / 30 / 60 FPS, 90–140 BPM, có nhiễu, FPS rung) | Đếm đủ số nhịp kỳ vọng; sai số BPM tối đa **0,2** trên tín hiệu giả lập |
-| Đứng yên + nhiễu | 0 nhịp đếm nhầm |
-| Nghỉ giữa chừng, mất dấu tay rồi nhảy toạ độ | Không bị đếm nhầm |
-| Kiểm thử đơn vị (`tools/test-lib.ts`) | **26/26** qua (góc, ngưỡng, chọn tay, chấm điểm, CSV, bất biến theo FPS) |
+| Rate counter on **simulated signals** (15 / 30 / 60 FPS, 90–140 BPM, noise, jittery FPS) | Counts the expected number of compressions; maximum BPM error **0.2** on simulated signals |
+| Standing still + noise | 0 false compressions |
+| Pause mid-session, hand tracking lost then coordinates jump | No false counts |
+| Unit tests (`tools/test-lib.ts`) | **26/26** pass (angles, thresholds, arm selection, scoring, CSV, FPS invariance) |
 
-> Đây là kết quả trên **tín hiệu mô phỏng**, không phải độ chính xác đo trên người thật.
+> These are results on **simulated signals**, not accuracy measured on real people.
 
-### ⚠️ Chưa kiểm chứng
+### ⚠️ Not yet verified
 
-- Hiệu năng và FPS trên điện thoại thật, đặc biệt máy cấu hình thấp.
-- Chạy offline và PWA trên điện thoại thật.
-- Các ngưỡng 160°, 0,28 và `minProminence = 0,04` là **ước đoán**, chưa hiệu chỉnh từ dữ liệu thật.
-- Ép rất nông (biên độ cổ tay < 0,04 chiều dài thân), chẳng hạn ép nhẹ trên gối, có thể không được đếm.
-- Mô phỏng cho thấy rơi 30% khung hình ở 15 FPS làm mất khoảng 7% nhịp.
-- Chưa có bộ phân loại do đội huấn luyện (cần dữ liệu từ ít nhất 6 người).
+- Performance and FPS on real phones, especially low-end devices.
+- Offline operation and the PWA on a real phone.
+- The thresholds 160°, 0.28 and `minProminence = 0.04` are **estimates**, not yet calibrated on real data.
+- Very shallow compressions (wrist amplitude < 0.04 of torso length), such as light compressions on a pillow, may not be counted.
+- Simulation suggests that dropping 30% of frames at 15 FPS loses about 7% of compressions.
+- There is no team-trained classifier yet (it needs data from at least 6 people).
 
-### ❌ Giới hạn vốn có của phương pháp
+### ❌ Inherent limits of the approach
 
-- **Không đo được độ sâu ép** vì chỉ dùng camera 2D nhìn nghiêng.
-- Kết quả phụ thuộc góc đặt camera, ánh sáng và quần áo.
-- Chỉ theo dõi **một người** và đo **một bên cánh tay** tại một thời điểm.
-- Đây là công cụ luyện tập, không phải thiết bị y tế.
+- **Compression depth cannot be measured** because only a 2D side-view camera is used.
+- Results depend on camera angle, lighting and clothing.
+- Only **one person** is tracked and **one arm** is measured at a time.
+- This is a practice tool, not a medical device.
 
-### 🚫 Những điều ứng dụng không nói
+### 🚫 What the app never says
 
-Không chẩn đoán, không nói "nạn nhân ổn" hay "không cần CPR", không hứa cứu sống, không nói đo được độ sâu ép.
-
----
-
-## 11. Nguồn y khoa
-
-| Tuyên bố trong app | Nguồn |
-| :--- | :--- |
-| Nhịp ép 100–120 lần/phút; sâu ≥ 5 cm và không quá 6 cm; đặt tay ở nửa dưới xương ức | [AHA 2025 Guidelines for CPR and ECC, Phần 7: Adult Basic Life Support](https://cpr.heart.org/en/resuscitation-science/cpr-and-ecc-guidelines/adult-basic-and-advanced-life-support) |
-| Số cấp cứu y tế **115** | Số cấp cứu của Việt Nam |
-
-Ứng dụng dùng **AHA 2025** làm chuẩn. Một số trang tiếng Việt vẫn ghi nhịp "100 lần/phút" và độ lún "4–5 cm", **khác** với bản AHA 2025. Chi tiết các tuyên bố, mức độ đã đối chiếu và những điều cần xác nhận thêm nằm ở [`docs/SOURCES_AND_CLAIMS.md`](./docs/SOURCES_AND_CLAIMS.md). Ứng dụng chỉ tóm tắt lại; vui lòng đối chiếu với tài liệu gốc.
+It does not diagnose, never says "the victim is fine" or "no CPR needed", never promises to save a life, and never claims to measure compression depth.
 
 ---
 
-## 12. Tài liệu
+## 11. Medical Sources
 
-| Tài liệu | Nội dung |
+| Claim in the app | Source |
 | :--- | :--- |
-| [`docs/DATA_COLLECTION.md`](./docs/DATA_COLLECTION.md) | Quy trình thu dữ liệu, bố trí camera, mẫu phiếu đồng ý phụ huynh |
-| [`docs/AUDIO_RECORDING.md`](./docs/AUDIO_RECORDING.md) | Cách thu 8 file giọng nói và lệnh `ffmpeg` chuẩn hoá |
-| [`docs/OFFLINE_TEST.md`](./docs/OFFLINE_TEST.md) | Bài thử chạy offline trên điện thoại thật |
-| [`docs/SOURCES_AND_CLAIMS.md`](./docs/SOURCES_AND_CLAIMS.md) | Nguồn y khoa và các tuyên bố được phép / không được phép |
-| [`docs/HANDOFF_24-11.md`](./docs/HANDOFF_24-11.md) | Bản bàn giao: đã làm gì, đã kiểm chứng gì, việc còn lại |
+| Rate of 100–120 per minute; depth ≥ 5 cm and no more than 6 cm; hand placement on the lower half of the breastbone | [AHA 2025 Guidelines for CPR and ECC, Part 7: Adult Basic Life Support](https://cpr.heart.org/en/resuscitation-science/cpr-and-ecc-guidelines/adult-basic-and-advanced-life-support) |
+| Medical emergency number **115** | Vietnam's emergency number |
+
+The app uses **AHA 2025** as its standard. Some Vietnamese web pages still state a rate of "100 per minute" and a depth of "4–5 cm", which **differ** from AHA 2025. Details of each claim, how far it has been cross-checked, and what still needs confirmation are in [`docs/SOURCES_AND_CLAIMS.md`](./docs/SOURCES_AND_CLAIMS.md). The app only summarises; please check the original document.
 
 ---
 
-## 13. Công nghệ
+## 12. Documentation
 
-| Lớp | Công nghệ |
+| Document | Contents |
 | :--- | :--- |
-| **Giao diện** | React 19, TypeScript, CSS thuần |
+| [`docs/DATA_COLLECTION.md`](./docs/DATA_COLLECTION.md) | Data-collection workflow, camera setup, parental consent template |
+| [`docs/AUDIO_RECORDING.md`](./docs/AUDIO_RECORDING.md) | How to record the 8 voice files and the `ffmpeg` normalisation command |
+| [`docs/OFFLINE_TEST.md`](./docs/OFFLINE_TEST.md) | The offline test on a real phone |
+| [`docs/SOURCES_AND_CLAIMS.md`](./docs/SOURCES_AND_CLAIMS.md) | Medical sources and which claims are allowed / not allowed |
+| [`docs/HANDOFF_24-11.md`](./docs/HANDOFF_24-11.md) | Handoff notes: what was done, what was verified, what remains |
+
+---
+
+## 13. Tech Stack
+
+| Layer | Technology |
+| :--- | :--- |
+| **UI** | React 19, TypeScript, plain CSS |
 | **Build** | Vite, `vite-plugin-pwa`, oxlint |
-| **Nhận diện** | MediaPipe Tasks Vision (Pose Landmarker + Hand Landmarker), chạy cục bộ bằng WebAssembly (GPU, tự hạ xuống CPU) |
-| **Đồ hoạ 3D** | Three.js (khung dây cánh tay và bàn tay) |
-| **Âm thanh** | Web Audio API (metronome, giọng thu sẵn), `speechSynthesis` dự phòng |
-| **Phân tích dữ liệu** | Python, NumPy, pandas, scikit-learn |
+| **Perception** | MediaPipe Tasks Vision (Pose Landmarker + Hand Landmarker), run locally via WebAssembly (GPU, falling back to CPU) |
+| **3D graphics** | Three.js (arm and hand wireframe) |
+| **Audio** | Web Audio API (metronome, pre-recorded voice), `speechSynthesis` fallback |
+| **Data analysis** | Python, NumPy, pandas, scikit-learn |
 
 ---
 
-## 14. Nhóm thực hiện
+## 14. Team
 
-**Lớp 11 Toán, Trường Phổ thông Năng khiếu (PTNK) — Nhóm 1**
-Dự án tham dự **WAICY 2026 (AI Showcase)**.
+**Grade 11 Mathematics, Pho Thong Nang Khieu (PTNK) High School for the Gifted — Group 1**
+Project entered in **WAICY 2026 (AI Showcase)**.
 
-| Thành viên | Vai trò |
+| Member | Role |
 | :--- | :--- |
-| _Họ tên_ | _Vai trò_ |
-| _Họ tên_ | _Vai trò_ |
-| _Họ tên_ | _Vai trò_ |
+| _Full name_ | _Role_ |
+| _Full name_ | _Role_ |
+| _Full name_ | _Role_ |
 
 ---
 
-## 15. Ghi nhận
+## 15. Acknowledgements
 
-- [MediaPipe](https://ai.google.dev/edge/mediapipe/solutions/guide) (Google): mô hình Pose Landmarker và Hand Landmarker
-- [American Heart Association](https://cpr.heart.org/): hướng dẫn CPR & ECC 2025
+- [MediaPipe](https://ai.google.dev/edge/mediapipe/solutions/guide) (Google): Pose Landmarker and Hand Landmarker models
+- [American Heart Association](https://cpr.heart.org/): 2025 CPR & ECC guidelines
 - [React](https://react.dev/), [Vite](https://vite.dev/), [Three.js](https://threejs.org/)
-- Cảm ơn những bạn đã tình nguyện tham gia thu dữ liệu và phụ huynh đã đồng ý cho các bạn tham gia.
+- Thanks to the friends who volunteered for data collection and to the parents who consented to their participation.
 
 ---
 
-## 16. Giấy phép
+## 16. License
 
-Chưa có tệp `LICENSE` trong repository. Hãy thêm giấy phép (ví dụ MIT) trước khi công bố công khai.
+There is no `LICENSE` file in the repository yet. Add a license (for example MIT) before making the project public.
 
 ---
 
 <div align="center">
 
-**Học ép tim đúng cách hôm nay, để sẵn sàng giúp người khác khi cần.**
+**Learn to do CPR properly today, so you are ready to help someone when it matters.**
 
-⭐ Nếu dự án hữu ích, hãy tặng chúng mình một ngôi sao nhé!
+⭐ If this project is useful to you, please give us a star!
 
 </div>
