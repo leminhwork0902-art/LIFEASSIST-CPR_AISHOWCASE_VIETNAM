@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
-import { PoseLandmarker, FilesetResolver, DrawingUtils } from '@mediapipe/tasks-vision';
+import * as THREE from 'three';
+import { PoseLandmarker, DrawingUtils } from '@mediapipe/tasks-vision';
 import type { NormalizedLandmark } from '@mediapipe/tasks-vision';
 
 import { tr } from '../i18n.ts';
@@ -23,6 +24,9 @@ import type { ArmSide, PostureLabel } from '../lib/posture.ts';
 import { getPostureModel, predictPosture } from '../lib/postureModel.ts';
 import { SessionScorer } from '../lib/sessionScorer.ts';
 import type { SessionSummary } from '../lib/sessionScorer.ts';
+import { DualArmHandTracker } from '../tracking/DualArmHandTracker.ts';
+import { ProceduralArmHandRig } from '../tracking/ProceduralArmHandMesh.ts';
+import type { TrackResult } from '../tracking/types.ts';
 
 import { EmergencyPanel } from './EmergencyPanel.tsx';
 import { RecorderPanel } from './RecorderPanel.tsx';
@@ -121,6 +125,7 @@ export function PoseTracker({ lang }: Props) {
   const [summary, setSummary] = useState<SessionSummary | null>(null);
   const [metronomeOn, setMetronomeOn] = useState(false);
   const [showCamera, setShowCamera] = useState(true);
+  const [show3dMesh, setShow3dMesh] = useState(true);
   const [showGuide, setShowGuide] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [isVideoRecording, setIsVideoRecording] = useState(false);
@@ -139,11 +144,13 @@ export function PoseTracker({ lang }: Props) {
   const modeRef = useRef(mode);
   const langRef = useRef(lang);
   const showCameraRef = useRef(showCamera);
+  const show3dMeshRef = useRef(show3dMesh);
   const isRecordingRef = useRef(isRecording);
   const recMetaRef = useRef(recMeta);
   useEffect(() => { modeRef.current = mode; }, [mode]);
   useEffect(() => { langRef.current = lang; }, [lang]);
   useEffect(() => { showCameraRef.current = showCamera; }, [showCamera]);
+  useEffect(() => { show3dMeshRef.current = show3dMesh; }, [show3dMesh]);
   useEffect(() => { isRecordingRef.current = isRecording; }, [isRecording]);
   useEffect(() => { recMetaRef.current = recMeta; }, [recMeta]);
 
@@ -270,12 +277,28 @@ export function PoseTracker({ lang }: Props) {
     // beginActive/finishSession chỉ dùng ref và setter ổn định nên không cần đưa vào deps
   }, [recorder, detector]);
 
-  // ---------------------------------------------------------------- vòng lặp AI + camera
+  // ---------------------------------------------------------------- vòng lặp AI + camera + lưới 3D
   useEffect(() => {
     let cancelled = false;
-    let landmarker: PoseLandmarker | null = null;
+    let tracker: DualArmHandTracker | null = null;
     let stream: MediaStream | null = null;
     let raf = 0;
+
+    // Three.js offscreen renderer để vẽ lưới 3D cánh tay + bàn tay khớp 1:1 lên canvas chính
+    const glRenderer = new THREE.WebGLRenderer({
+      alpha: true,
+      antialias: true,
+      preserveDrawingBuffer: true,
+    });
+    glRenderer.setPixelRatio(1);
+    glRenderer.setClearColor(0x000000, 0);
+    const glScene = new THREE.Scene();
+    const glCamera = new THREE.OrthographicCamera(-16 / 9, 16 / 9, 1, -1, 0.01, 100);
+    glCamera.position.set(0, 0, 10);
+    const armRig = new ProceduralArmHandRig(0x22ff66, 0x44ffaa);
+    glScene.add(armRig.group);
+    let glWidth = 0;
+    let glHeight = 0;
 
     const angleEma = new TimeEma(120);
     const offsetEma = new TimeEma(120);
@@ -345,8 +368,6 @@ export function PoseTracker({ lang }: Props) {
         scorerRef.current.addFrame({ dtMs: dt, compressing: out.compressing, bpm: out.bpm, posture });
 
         if (out.compressing) {
-          // Tư thế và nhịp được xét ĐỘC LẬP; cue nào lâu chưa được nhắc nhất sẽ được phát trước,
-          // nên người ép sai tư thế vẫn nghe nhắc về nhịp (lỗi cũ: nhịp chỉ nhắc khi tư thế đúng).
           const cands: CueId[] = [];
           if (posture === 'BENT_ELBOW') cands.push('straighten');
           else if (posture === 'OFF_AXIS') cands.push('shoulders');
@@ -376,8 +397,8 @@ export function PoseTracker({ lang }: Props) {
       raf = requestAnimationFrame(loop);
       const video = videoRef.current;
       const canvas = canvasRef.current;
-      if (!video || !canvas || !landmarker || video.readyState < 2 || video.videoWidth === 0) return;
-      // Chỉ xử lý khi có khung hình video mới (rAF có thể chạy nhanh hơn camera)
+      if (!video || !canvas || !tracker || video.readyState < 2 || video.videoWidth === 0) return;
+      // Chỉ xử lý khi có khung hình video mới
       if (video.currentTime === lastVideoTime) return;
       lastVideoTime = video.currentTime;
 
@@ -397,13 +418,23 @@ export function PoseTracker({ lang }: Props) {
         canvas.height = video.videoHeight;
         drawing = null;
       }
+      if (glWidth !== video.videoWidth || glHeight !== video.videoHeight) {
+        glWidth = video.videoWidth;
+        glHeight = video.videoHeight;
+        const aspect = glWidth / glHeight;
+        glCamera.left = -aspect;
+        glCamera.right = aspect;
+        glCamera.updateProjectionMatrix();
+        glRenderer.setSize(glWidth, glHeight, false);
+      }
+
       const ctx = canvas.getContext('2d');
       if (!ctx) return;
       if (!drawing) drawing = new DrawingUtils(ctx);
 
-      let results;
+      let result: TrackResult | null = null;
       try {
-        results = landmarker.detectForVideo(video, ts);
+        result = tracker.processVideoFrame(video, ts);
         errorStreak = 0;
       } catch {
         errorStreak += 1;
@@ -414,6 +445,7 @@ export function PoseTracker({ lang }: Props) {
         }
         return;
       }
+      if (!result) return;
 
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       if (showCameraRef.current) ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
@@ -425,10 +457,16 @@ export function PoseTracker({ lang }: Props) {
       ctx.strokeRect(canvas.width * 0.15, canvas.height * 0.1, canvas.width * 0.7, canvas.height * 0.85);
       ctx.setLineDash([]);
 
-      const lm = results.landmarks?.[0];
+      const lm = result.poseLandmarks;
       if (lm) {
-        drawing.drawConnectors(lm, PoseLandmarker.POSE_CONNECTIONS, { color: '#22C55E', lineWidth: 3 });
-        drawing.drawLandmarks(lm, { color: '#EF4444', lineWidth: 1, radius: 4 });
+        if (show3dMeshRef.current) {
+          armRig.update(result.frames);
+          glRenderer.render(glScene, glCamera);
+          ctx.drawImage(glRenderer.domElement, 0, 0, canvas.width, canvas.height);
+        } else {
+          drawing.drawConnectors(lm, PoseLandmarker.POSE_CONNECTIONS, { color: '#22C55E', lineWidth: 3 });
+          drawing.drawLandmarks(lm, { color: '#EF4444', lineWidth: 1, radius: 4 });
+        }
         processFrame(lm, now, video.videoWidth / video.videoHeight);
       } else {
         detector.notifyLost();
@@ -441,29 +479,21 @@ export function PoseTracker({ lang }: Props) {
     };
 
     const init = async () => {
-      // 1) Mô hình: thử GPU, nếu lỗi thì CPU (lỗi cũ: GPU hỏng bị báo thành "không tìm thấy model")
+      // 1) Khởi tạo PoseLandmarker + HandLandmarker qua DualArmHandTracker
       let cpu = false;
       try {
-        const vision = await FilesetResolver.forVisionTasks(asset('mediapipe/wasm'));
-        const create = (delegate: 'GPU' | 'CPU') =>
-          PoseLandmarker.createFromOptions(vision, {
-            baseOptions: { modelAssetPath: asset('mediapipe/pose_landmarker_lite.task'), delegate },
-            runningMode: 'VIDEO',
-            numPoses: 1,
-          });
-        try {
-          landmarker = await create('GPU');
-        } catch {
-          landmarker = await create('CPU');
-          cpu = true;
-        }
+        tracker = new DualArmHandTracker();
+        const res = await tracker.init(asset);
+        cpu = res.cpu;
       } catch {
+        tracker?.dispose();
+        tracker = null;
         if (!cancelled) setEngine({ status: 'ERROR', errorKey: 'errModel', cpu: false });
         return;
       }
       if (cancelled) {
-        landmarker?.close();
-        landmarker = null;
+        tracker?.dispose();
+        tracker = null;
         return;
       }
 
@@ -508,8 +538,10 @@ export function PoseTracker({ lang }: Props) {
       stream?.getTracks().forEach((tk) => tk.stop());
       const v = videoRef.current;
       if (v) v.srcObject = null;
-      landmarker?.close();
-      landmarker = null;
+      tracker?.dispose();
+      tracker = null;
+      armRig.dispose();
+      glRenderer.dispose();
     };
   }, [coach, detector, recorder]);
 
@@ -525,7 +557,7 @@ export function PoseTracker({ lang }: Props) {
   };
 
   const startVideoRecording = () => {
-    // Ghi hình từ camera gốc (nhẹ máy). Nếu muốn ghi DÍNH CẢ KHUNG XƯƠNG AI, đổi dòng dưới thành:
+    // Ghi hình từ camera gốc (nhẹ máy). Nếu muốn ghi DÍNH CẢ LƯỚI 3D / KHUNG XƯƠNG AI, đổi dòng dưới thành:
     // const stream = canvasRef.current?.captureStream(30);
     const stream = videoRef.current?.srcObject as MediaStream | null;
     if (!stream) return;
@@ -565,7 +597,7 @@ export function PoseTracker({ lang }: Props) {
       if (recordedUrl) URL.revokeObjectURL(recordedUrl);
     };
   }, [recordedUrl]);
-  
+
   // ---------------------------------------------------------------- hiển thị
   const practice = mode === 'PRACTICE';
   const usingModel = getPostureModel() !== null;
@@ -660,6 +692,10 @@ export function PoseTracker({ lang }: Props) {
           <label className="check">
             <input type="checkbox" checked={showCamera} onChange={(e) => setShowCamera(e.target.checked)} />
             {t('showCamera')}
+          </label>
+          <label className="check">
+            <input type="checkbox" checked={show3dMesh} onChange={(e) => setShow3dMesh(e.target.checked)} />
+            {isEn ? '3D Arm Mesh' : 'Lưới 3D tay'}
           </label>
         </div>
       )}
