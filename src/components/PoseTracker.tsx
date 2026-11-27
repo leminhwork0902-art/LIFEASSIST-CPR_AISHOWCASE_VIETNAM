@@ -1,0 +1,1361 @@
+import { useEffect, useRef, useState } from 'react';
+import type { ReactNode } from 'react';
+import { createPortal } from 'react-dom';
+import * as THREE from 'three';
+import { PoseLandmarker, DrawingUtils } from '@mediapipe/tasks-vision';
+import type { NormalizedLandmark } from '@mediapipe/tasks-vision';
+import { tr } from '../i18n.ts';
+import type { StringKey } from '../i18n.ts';
+import { AudioCoach } from '../lib/audio.ts';
+import type { CueId, Lang } from '../lib/audio.ts';
+import { asset } from '../lib/assets.ts';
+import {
+  COUNTDOWN_SECONDS,
+  HUD_INTERVAL_MS,
+  METRONOME_BPM,
+  SESSION_SECONDS,
+  TARGET_BPM_MAX,
+  TARGET_BPM_MIN,
+} from '../lib/config.ts';
+import { CprDetector } from '../lib/cprDetector.ts';
+import { CsvRecorder } from '../lib/csvRecorder.ts';
+import type { RecorderMeta } from '../lib/csvRecorder.ts';
+import {
+  chooseSide,
+  classifyByThreshold,
+  computeArmMetrics,
+  isArmVisible,
+  TimeEma,
+} from '../lib/posture.ts';
+import type { ArmSide, PostureLabel } from '../lib/posture.ts';
+import { getPostureModel, predictPosture } from '../lib/postureModel.ts';
+import { SessionScorer } from '../lib/sessionScorer.ts';
+import type { SessionSummary } from '../lib/sessionScorer.ts';
+import { DualArmHandTracker } from '../tracking/DualArmHandTracker.ts';
+import { ProceduralArmHandRig } from '../tracking/ProceduralArmHandMesh.ts';
+import type { TrackResult } from '../tracking/types.ts';
+import { EmergencyActions, EmergencySteps } from './EmergencyPanel.tsx';
+import {
+  IconActivity,
+  IconAlert,
+  IconAward,
+  IconCamera,
+  IconDownload,
+  IconFilm,
+  IconHeartPulse,
+  IconInfo,
+  IconPlay,
+  IconRecord,
+  IconStop,
+  IconTrash,
+  IconX,
+} from './Icons.tsx';
+import { RecorderPanel } from './RecorderPanel.tsx';
+import { SummaryCard } from './SummaryCard.tsx';
+import type { CoachState } from '../lib/coachAudio.ts';
+import { HistoryPanel } from './HistoryPanel.tsx';
+import {
+  appendHistory,
+  clearHistory,
+  deleteHistoryEntry,
+  loadHistory,
+  type HistoryEntry,
+} from '../lib/historyStorage.ts';
+import { syncSessionToSheets } from '../lib/sheetsSync.ts';
+
+type AppMode = 'PRACTICE' | 'EMERGENCY';
+type Phase = 'IDLE' | 'COUNTDOWN' | 'ACTIVE';
+type RateState = 'WAIT' | 'MEASURING' | 'LOW' | 'OK' | 'HIGH';
+type PostureState = 'LOST' | PostureLabel;
+
+interface Hud {
+  fps: number;
+  tracking: boolean;
+  bpm: number | null;
+  rate: RateState;
+  posture: PostureState;
+  elbow: number;
+  offset: number;
+  phase: Phase;
+  secondsLeft: number;
+  rows: number;
+  taps: number;
+}
+
+const INITIAL_HUD: Hud = {
+  fps: 0,
+  tracking: false,
+  bpm: null,
+  rate: 'WAIT',
+  posture: 'LOST',
+  elbow: 0,
+  offset: 0,
+  phase: 'IDLE',
+  secondsLeft: 0,
+  rows: 0,
+  taps: 0,
+};
+
+/** Dữ liệu cập nhật ở tốc độ khung hình, KHÔNG gây render lại React.
+HUD lấy mẫu từ đây ~8 lần/giây. */
+interface Live {
+  fps: number;
+  tracking: boolean;
+  bpm: number | null;
+  rate: RateState;
+  posture: PostureState;
+  elbow: number;
+  offset: number;
+}
+
+interface SessionRef {
+  phase: Phase;
+  phaseEndsAt: number;
+  startedAt: number;
+}
+
+const CUE_COOLDOWN_MS = 3200;
+
+const CUE_TEXT: Record<CueId, StringKey> = {
+  faster: 'cueFaster',
+  slower: 'cueSlower',
+  straighten: 'cueStraighten',
+  shoulders: 'cueShoulders',
+};
+
+function cameraErrorKey(e: unknown): StringKey {
+  const name = e instanceof DOMException ? e.name : '';
+  if (name === 'NotAllowedError' || name === 'SecurityError')
+    return 'errCameraDenied';
+  if (name === 'NotFoundError' || name === 'OverconstrainedError')
+    return 'errCameraNotFound';
+  return 'errCameraOther';
+}
+
+interface Props {
+  lang: Lang;
+  onCoachStatusChange?: (status: {
+    state: CoachState;
+    bpm: number | null;
+    isActiveSession: boolean;
+    externalSpeaking: boolean;
+  }) => void;
+  /** Phần tử (vd. AI Coach) được gắn vào cột phải của bảng điều khiển. */
+  coachSlot?: ReactNode;
+  /** id của phần tử trên header để chèn bộ chuyển chế độ. */
+  modeSlotId?: string;
+}
+
+export function PoseTracker({ lang, onCoachStatusChange, coachSlot, modeSlotId }: Props) {
+  const t = tr(lang);
+  const [modeSlot, setModeSlot] = useState<HTMLElement | null>(null);
+  const [summaryOpen, setSummaryOpen] = useState(false);
+  const replayRef = useRef<HTMLElement | null>(null);
+
+  useEffect(() => {
+    setModeSlot(modeSlotId ? document.getElementById(modeSlotId) : null);
+  }, [modeSlotId]);
+
+  // ---- DOM / engine objects (ổn định giữa các lần render)
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const [coachSpeaking, setCoachSpeaking] = useState(false);
+  const [coach] = useState(
+    () => new AudioCoach((speaking) => setCoachSpeaking(speaking))
+  );
+  const [detector] = useState(() => new CprDetector());
+  const [recorder] = useState(() => new CsvRecorder());
+  const scorerRef = useRef(new SessionScorer());
+
+  // ---- State hiển thị
+  const [mode, setMode] = useState<AppMode>('PRACTICE');
+  const [engine, setEngine] = useState<{
+    status: 'LOADING' | 'READY' | 'ERROR';
+    errorKey: StringKey | null;
+    cpu: boolean;
+  }>({
+    status: 'LOADING',
+    errorKey: null,
+    cpu: false,
+  });
+  const [audioMissing, setAudioMissing] = useState(false);
+  const [hud, setHud] = useState<Hud>(INITIAL_HUD);
+  const [summary, setSummary] = useState<SessionSummary | null>(null);
+  const [history, setHistory] = useState<HistoryEntry[]>(() => loadHistory());
+  const [metronomeOn, setMetronomeOn] = useState(false);
+  const [showCamera, setShowCamera] = useState(true);
+  const [show3dMesh, setShow3dMesh] = useState(true);
+  const [showGuide, setShowGuide] = useState(false);
+  const [isRecording, setIsRecording] = useState(false);
+  const [isVideoRecording, setIsVideoRecording] = useState(false);
+  const [recordedUrl, setRecordedUrl] = useState<string | null>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const recordedChunksRef = useRef<Blob[]>([]);
+  const [recMeta, setRecMeta] = useState<RecorderMeta>({
+    subjectId: 'S01',
+    label: 'CORRECT_POSTURE',
+    cameraAngle: 'SIDE_90',
+    lighting: 'BRIGHT',
+    device: '',
+  });
+  
+  // ---- Refs phản chiếu state để vòng lặp khung hình đọc được mà không bị "stale"
+  const modeRef = useRef(mode);
+  const langRef = useRef(lang);
+  const showCameraRef = useRef(showCamera);
+  const show3dMeshRef = useRef(show3dMesh);
+  const isRecordingRef = useRef(isRecording);
+  const recMetaRef = useRef(recMeta);
+
+  useEffect(() => {
+    modeRef.current = mode;
+  }, [mode]);
+  useEffect(() => {
+    langRef.current = lang;
+  }, [lang]);
+  useEffect(() => {
+    showCameraRef.current = showCamera;
+  }, [showCamera]);
+  useEffect(() => {
+    show3dMeshRef.current = show3dMesh;
+  }, [show3dMesh]);
+  useEffect(() => {
+    isRecordingRef.current = isRecording;
+  }, [isRecording]);
+  useEffect(() => {
+    recMetaRef.current = recMeta;
+  }, [recMeta]);
+
+  const sessionRef = useRef<SessionRef>({
+    phase: 'IDLE',
+    phaseEndsAt: 0,
+    startedAt: 0,
+  });
+  const liveRef = useRef<Live>({
+    fps: 0,
+    tracking: false,
+    bpm: null,
+    rate: 'WAIT',
+    posture: 'LOST',
+    elbow: 0,
+    offset: 0,
+  });
+  const tapsRef = useRef(0);
+  const lastCueAtRef = useRef(0);
+  const lastCueByIdRef = useRef<Record<CueId, number>>({
+    faster: 0,
+    slower: 0,
+    straighten: 0,
+    shoulders: 0,
+  });
+
+  // ---- Âm thanh
+  useEffect(() => {
+    let cancelled = false;
+    void coach.preload(lang).then((r) => {
+      if (!cancelled) setAudioMissing(r.missing.length > 0);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [coach, lang]);
+
+  useEffect(() => () => coach.dispose(), [coach]);
+
+  // ---- Điều khiển phiên
+  const beginActive = (now: number) => {
+    detector.reset();
+    scorerRef.current = new SessionScorer();
+    lastCueAtRef.current = 0;
+    sessionRef.current = {
+      phase: 'ACTIVE',
+      phaseEndsAt: now + SESSION_SECONDS * 1000,
+      startedAt: now,
+    };
+  };
+
+  const finishSession = (now: number) => {
+    const s = sessionRef.current;
+    if (s.phase === 'ACTIVE') {
+      const elapsed = Math.max(
+        1,
+        Math.min(SESSION_SECONDS, (now - s.startedAt) / 1000)
+      );
+      const result = scorerRef.current.summarize(elapsed);
+      setSummary(result);
+      if (result.totalCompressions > 0) {
+        setHistory(appendHistory(result));
+        void syncSessionToSheets(result, recMetaRef.current);
+      }
+    }
+    sessionRef.current = { phase: 'IDLE', phaseEndsAt: 0, startedAt: 0 };
+  };
+
+  const startSession = () => {
+    coach.unlock(); // phải gọi ngay trong sự kiện bấm nút (iOS/Safari)
+    setSummary(null);
+    sessionRef.current = {
+      phase: 'COUNTDOWN',
+      phaseEndsAt: performance.now() + COUNTDOWN_SECONDS * 1000,
+      startedAt: 0,
+    };
+  };
+
+  const stopSession = () => finishSession(performance.now());
+
+  const switchMode = (m: AppMode) => {
+    if (m === mode) return;
+    if (sessionRef.current.phase !== 'IDLE') {
+      sessionRef.current = { phase: 'IDLE', phaseEndsAt: 0, startedAt: 0 }; // huỷ, không chấm điểm
+    }
+    if (m === 'EMERGENCY') setIsRecording(false);
+    setSummary(null);
+    setMode(m);
+  };
+
+  const toggleMetronome = () => {
+    coach.unlock();
+    if (coach.metronomeOn) {
+      coach.stopMetronome();
+      setMetronomeOn(false);
+    } else {
+      coach.startMetronome(METRONOME_BPM);
+      setMetronomeOn(true);
+    }
+  };
+
+  // ---- Ghi dữ liệu
+  const toggleRecording = () => {
+    if (isRecording) {
+      setIsRecording(false);
+    } else {
+      recorder.start(performance.now());
+      tapsRef.current = 0;
+      setIsRecording(true);
+      (document.activeElement as HTMLElement | null)?.blur(); // để phím Cách không bấm lại nút này
+    }
+  };
+
+  const tapGroundTruth = () => {
+    if (!isRecordingRef.current) return;
+    recorder.tap();
+    tapsRef.current += 1;
+  };
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.code !== 'Space' || !isRecordingRef.current) return;
+      const el = e.target as HTMLElement | null;
+      const tag = el?.tagName;
+      if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return;
+      e.preventDefault();
+      recorder.tap();
+      tapsRef.current += 1;
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [recorder]);
+
+  useEffect(() => {
+  const id = window.setInterval(() => {
+    const now = performance.now();
+    const s = sessionRef.current;
+
+    if (s.phase === 'COUNTDOWN' && now >= s.phaseEndsAt) {
+      beginActive(now);
+    } else if (s.phase === 'ACTIVE' && now >= s.phaseEndsAt) {
+      finishSession(now);
+    }
+
+    const cur = sessionRef.current;
+    const live = liveRef.current;
+    const secondsLeft =
+      cur.phase === 'IDLE'
+        ? 0
+        : Math.max(0, Math.ceil((cur.phaseEndsAt - now) / 1000));
+
+    setHud({
+      fps: live.fps,
+      tracking: live.tracking,
+      bpm: live.bpm,
+      rate: live.rate,
+      posture: live.posture,
+      elbow: live.elbow,
+      offset: live.offset,
+      phase: cur.phase,
+      secondsLeft,
+      rows: recorder.count, // kiểm tra lại tên thuộc tính đếm dòng trong ../lib/csvRecorder.ts
+      taps: tapsRef.current,
+    });
+  }, HUD_INTERVAL_MS);
+
+  return () => window.clearInterval(id);
+}, [recorder]);
+
+  // ---- Đồng bộ trạng thái sang nhân vật AI Coach 3D
+  useEffect(() => {
+    if (!onCoachStatusChange) return;
+    const isActiveSession = mode === 'PRACTICE' && hud.phase === 'ACTIVE';
+    const suppressCoachSpeech =
+      isActiveSession || (mode === 'PRACTICE' && hud.phase === 'COUNTDOWN');
+    let nextState: CoachState = 'idle';
+
+    if (mode === 'EMERGENCY' || hud.phase === 'COUNTDOWN') {
+      nextState = 'demo';
+    } else if (isActiveSession && hud.tracking) {
+      if (hud.posture === 'BENT_ELBOW' || hud.posture === 'OFF_AXIS') {
+        nextState = 'fix_elbow';
+      } else if (hud.rate === 'LOW') {
+        nextState = 'too_slow';
+      } else if (hud.rate === 'HIGH') {
+        nextState = 'too_fast';
+      } else if (hud.rate === 'OK' && hud.posture === 'CORRECT_POSTURE') {
+        nextState = 'good';
+      }
+    } else if (
+      mode === 'PRACTICE' &&
+      hud.phase === 'IDLE' &&
+      summary?.enoughData
+    ) {
+      if (summary.mainIssue === 'NONE') {
+        nextState = 'good';
+      } else if (
+        summary.mainIssue === 'BENT_ELBOW' ||
+        summary.mainIssue === 'OFF_AXIS'
+      ) {
+        nextState = 'fix_elbow';
+      } else if (summary.mainIssue === 'TOO_SLOW') {
+        nextState = 'too_slow';
+      } else if (summary.mainIssue === 'TOO_FAST') {
+        nextState = 'too_fast';
+      }
+    }
+
+    onCoachStatusChange({
+      state: nextState,
+      bpm: hud.bpm,
+      isActiveSession: suppressCoachSpeech,
+      externalSpeaking: coachSpeaking,
+    });
+  }, [
+    mode,
+    hud.phase,
+    hud.tracking,
+    hud.posture,
+    hud.rate,
+    hud.bpm,
+    summary,
+    coachSpeaking,
+    onCoachStatusChange,
+  ]);
+
+  // ---- Vòng lặp AI + camera + lưới 3D
+  useEffect(() => {
+    let cancelled = false;
+    let tracker: DualArmHandTracker | null = null;
+    let stream: MediaStream | null = null;
+    let raf = 0;
+
+    // Three.js offscreen renderer để vẽ lưới 3D cánh tay + bàn tay khớp 1:1 lên canvas chính
+    const glRenderer = new THREE.WebGLRenderer({
+      alpha: true,
+      antialias: true,
+      preserveDrawingBuffer: true,
+    });
+    glRenderer.setPixelRatio(1);
+    glRenderer.setClearColor(0x000000, 0);
+
+    const glScene = new THREE.Scene();
+    const glCamera = new THREE.OrthographicCamera(
+      -16 / 9,
+      16 / 9,
+      1,
+      -1,
+      0.01,
+      100
+    );
+    glCamera.position.set(0, 0, 10);
+
+    const armRig = new ProceduralArmHandRig(0x22ff66, 0x44ffaa);
+    glScene.add(armRig.group);
+
+    let glWidth = 0;
+    let glHeight = 0;
+
+    const angleEma = new TimeEma(120);
+    const offsetEma = new TimeEma(120);
+    let side: ArmSide | null = null;
+    let lastVideoTime = -1;
+    let lastTs = 0;
+    let lastFrameAt = 0;
+    let fpsCount = 0;
+    let fpsWindowStart = performance.now();
+    let drawing: DrawingUtils | null = null;
+    let errorStreak = 0;
+
+    const model = getPostureModel();
+
+    const pickCue = (cands: CueId[], now: number) => {
+      if (cands.length === 0 || now - lastCueAtRef.current < CUE_COOLDOWN_MS)
+        return;
+      let best = cands[0];
+      for (const c of cands) {
+        if (lastCueByIdRef.current[c] < lastCueByIdRef.current[best]) best = c;
+      }
+      const text = tr(langRef.current)(CUE_TEXT[best]);
+      coach.playCue(best, langRef.current, text);
+      lastCueAtRef.current = now;
+      lastCueByIdRef.current[best] = now;
+    };
+
+    const processFrame = (
+      lm: NormalizedLandmark[],
+      now: number,
+      aspect: number
+    ) => {
+      const dt = lastFrameAt === 0 ? 0 : now - lastFrameAt;
+      lastFrameAt = now;
+      const live = liveRef.current;
+
+      side = chooseSide(lm, side);
+      const m = computeArmMetrics(lm, aspect, side);
+      if (!isArmVisible(m)) {
+        detector.notifyLost();
+        angleEma.reset();
+        offsetEma.reset();
+        live.tracking = false;
+        live.posture = 'LOST';
+        live.rate = 'WAIT';
+        live.bpm = null;
+        return;
+      }
+
+      const angle = angleEma.push(m.elbowAngleDeg, now);
+      const offset = offsetEma.push(m.offsetNorm, now);
+      live.tracking = true;
+      live.elbow = Math.round(angle);
+      live.offset = Number(offset.toFixed(2));
+
+      // Tư thế: bộ phân loại đội huấn luyện nếu có, nếu không thì ngưỡng cố định
+      const posture: PostureLabel = model
+        ? predictPosture(model, angle, offset).label
+        : classifyByThreshold(angle, offset);
+      live.posture = posture;
+
+      // Nhịp
+      const out = detector.update(m.wristYNorm, now);
+      live.bpm = out.bpm;
+      if (!out.compressing) live.rate = 'WAIT';
+      else if (out.bpm === null) live.rate = 'MEASURING';
+      else if (out.bpm < TARGET_BPM_MIN) live.rate = 'LOW';
+      else if (out.bpm > TARGET_BPM_MAX) live.rate = 'HIGH';
+      else live.rate = 'OK';
+
+      // Chấm điểm + nhắc giọng nói: chỉ trong phiên đang chạy ở chế độ luyện tập
+      const sess = sessionRef.current;
+      if (modeRef.current === 'PRACTICE' && sess.phase === 'ACTIVE') {
+        if (out.peak) scorerRef.current.addPeak();
+        scorerRef.current.addFrame({
+          dtMs: dt,
+          compressing: out.compressing,
+          bpm: out.bpm,
+          posture,
+        });
+        if (out.compressing) {
+          const cands: CueId[] = [];
+          if (posture === 'BENT_ELBOW') cands.push('straighten');
+          else if (posture === 'OFF_AXIS') cands.push('shoulders');
+          if (live.rate === 'LOW') cands.push('faster');
+          else if (live.rate === 'HIGH') cands.push('slower');
+          pickCue(cands, now);
+        }
+      }
+
+      if (isRecordingRef.current) {
+        recorder.push(now, recMetaRef.current, {
+          elbowAngleDeg: m.elbowAngleDeg,
+          offsetNorm: m.offsetNorm,
+          wristYNorm: m.wristYNorm,
+          wristYSmooth: out.smoothed,
+          armVisibility: m.visibility,
+          fps: live.fps,
+          isCompressing: out.compressing,
+          detectedPeak: out.peak,
+        });
+      }
+    };
+
+    let halted = false;
+
+    const loop = () => {
+      if (halted) return;
+      raf = requestAnimationFrame(loop);
+
+      const video = videoRef.current;
+      const canvas = canvasRef.current;
+      if (
+        !video ||
+        !canvas ||
+        !tracker ||
+        video.readyState < 2 ||
+        video.videoWidth === 0
+      )
+        return;
+
+      // Chỉ xử lý khi có khung hình video mới
+      if (video.currentTime === lastVideoTime) return;
+      lastVideoTime = video.currentTime;
+
+      const now = performance.now();
+      const ts = Math.max(now, lastTs + 1); // detectForVideo yêu cầu timestamp tăng nghiêm ngặt
+      lastTs = ts;
+
+      fpsCount += 1;
+      if (now - fpsWindowStart >= 1000) {
+        liveRef.current.fps = Math.round(
+          (fpsCount * 1000) / (now - fpsWindowStart)
+        );
+        fpsCount = 0;
+        fpsWindowStart = now;
+      }
+
+      if (
+        canvas.width !== video.videoWidth ||
+        canvas.height !== video.videoHeight
+      ) {
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+        drawing = null;
+      }
+
+      if (glWidth !== video.videoWidth || glHeight !== video.videoHeight) {
+        glWidth = video.videoWidth;
+        glHeight = video.videoHeight;
+        const aspect = glWidth / glHeight;
+        glCamera.left = -aspect;
+        glCamera.right = aspect;
+        glCamera.updateProjectionMatrix();
+        glRenderer.setSize(glWidth, glHeight, false);
+      }
+
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
+      if (!drawing) drawing = new DrawingUtils(ctx);
+
+      let result: TrackResult | null = null;
+      try {
+        result = tracker.processVideoFrame(video, ts);
+        errorStreak = 0;
+      } catch {
+        errorStreak += 1;
+        if (errorStreak === 30) {
+          halted = true;
+          cancelAnimationFrame(raf);
+          setEngine({ status: 'ERROR', errorKey: 'errModel', cpu: false });
+        }
+        return;
+      }
+
+      if (!result) return;
+
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      if (showCameraRef.current)
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+      // Khung căn chỉnh
+      ctx.strokeStyle = 'rgba(56, 189, 248, 0.35)';
+      ctx.setLineDash([8, 8]);
+      ctx.lineWidth = 2;
+      ctx.strokeRect(
+        canvas.width * 0.15,
+        canvas.height * 0.1,
+        canvas.width * 0.7,
+        canvas.height * 0.85
+      );
+      ctx.setLineDash([]);
+
+      const lm = result.poseLandmarks;
+      if (lm) {
+        if (show3dMeshRef.current) {
+          armRig.update(result.frames);
+          glRenderer.render(glScene, glCamera);
+          ctx.drawImage(
+            glRenderer.domElement,
+            0,
+            0,
+            canvas.width,
+            canvas.height
+          );
+        } else {
+          drawing.drawConnectors(lm, PoseLandmarker.POSE_CONNECTIONS, {
+            color: '#22C55E',
+            lineWidth: 3,
+          });
+          drawing.drawLandmarks(lm, {
+            color: '#EF4444',
+            lineWidth: 1,
+            radius: 4,
+          });
+        }
+        processFrame(lm, now, video.videoWidth / video.videoHeight);
+      } else {
+        detector.notifyLost();
+        const live = liveRef.current;
+        live.tracking = false;
+        live.posture = 'LOST';
+        live.rate = 'WAIT';
+        live.bpm = null;
+      }
+    };
+
+    const init = async () => {
+      // 1) Khởi tạo PoseLandmarker + HandLandmarker qua DualArmHandTracker
+      let cpu = false;
+      try {
+        tracker = new DualArmHandTracker();
+        const res = await tracker.init(asset);
+        cpu = res.cpu;
+      } catch {
+        tracker?.dispose();
+        tracker = null;
+        if (!cancelled)
+          setEngine({ status: 'ERROR', errorKey: 'errModel', cpu: false });
+        return;
+      }
+
+      if (cancelled) {
+        tracker?.dispose();
+        tracker = null;
+        return;
+      }
+
+      // 2) Camera: báo lỗi riêng, không gộp với lỗi model
+      if (!navigator.mediaDevices?.getUserMedia) {
+        setEngine({ status: 'ERROR', errorKey: 'errCameraInsecure', cpu });
+        return;
+      }
+
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: {
+            width: { ideal: 1280 },
+            height: { ideal: 720 },
+            facingMode: 'user',
+          },
+          audio: false,
+        });
+      } catch (e) {
+        if (!cancelled)
+          setEngine({ status: 'ERROR', errorKey: cameraErrorKey(e), cpu });
+        return;
+      }
+
+      if (cancelled) {
+        stream?.getTracks().forEach((tk) => tk.stop());
+        stream = null;
+        return;
+      }
+
+      const video = videoRef.current;
+      if (!video) return;
+      video.srcObject = stream;
+      try {
+        await video.play();
+      } catch {
+        /* một số trình duyệt ném lỗi khi bị gián đoạn; vòng lặp vẫn chờ readyState */
+      }
+
+      if (cancelled) return;
+      setEngine({ status: 'READY', errorKey: null, cpu });
+      raf = requestAnimationFrame(loop);
+    };
+
+    void init();
+
+    return () => {
+      cancelled = true;
+      cancelAnimationFrame(raf);
+      stream?.getTracks().forEach((tk) => tk.stop());
+      const v = videoRef.current;
+      if (v) v.srcObject = null;
+      tracker?.dispose();
+      tracker = null;
+      armRig.dispose();
+      glRenderer.dispose();
+    };
+  }, [coach, detector, recorder]);
+
+  // ---- Ghi hình & xem lại video
+  const getSupportedMimeType = () => {
+    const types = [
+      'video/webm; codecs=vp9',
+      'video/webm; codecs=vp8',
+      'video/webm',
+      'video/mp4',
+    ];
+    return types.find((type) => MediaRecorder.isTypeSupported(type)) || '';
+  };
+
+  const startVideoRecording = () => {
+    // Ghi hình từ camera gốc (nhẹ máy). Nếu muốn ghi DÍNH CẢ LƯỚI 3D / KHUNG XƯƠNG AI, đổi dòng dưới thành:
+    // const stream = canvasRef.current?.captureStream(30);
+    const stream = videoRef.current?.srcObject as MediaStream | null;
+    if (!stream) return;
+
+    if (recordedUrl) {
+      URL.revokeObjectURL(recordedUrl);
+      setRecordedUrl(null);
+    }
+
+    recordedChunksRef.current = [];
+    const mimeType = getSupportedMimeType();
+    const rec = new MediaRecorder(
+      stream,
+      mimeType ? { mimeType } : undefined
+    );
+
+    rec.ondataavailable = (e) => {
+      if (e.data.size > 0) recordedChunksRef.current.push(e.data);
+    };
+
+    rec.onstop = () => {
+      const blob = new Blob(recordedChunksRef.current, {
+        type: mimeType || 'video/webm',
+      });
+      setRecordedUrl(URL.createObjectURL(blob));
+    };
+
+    rec.start();
+    mediaRecorderRef.current = rec;
+    setIsVideoRecording(true);
+  };
+
+  const stopVideoRecording = () => {
+    if (mediaRecorderRef.current && isVideoRecording) {
+      mediaRecorderRef.current.stop();
+      setIsVideoRecording(false);
+    }
+  };
+
+  useEffect(() => {
+    return () => {
+      if (recordedUrl) URL.revokeObjectURL(recordedUrl);
+    };
+  }, [recordedUrl]);
+
+  useEffect(() => {
+    setSummaryOpen(summary !== null);
+  }, [summary]);
+
+  useEffect(() => {
+    if (!showGuide && !summaryOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      setShowGuide(false);
+      setSummaryOpen(false);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [showGuide, summaryOpen]);
+
+  // ---- Hiển thị
+  const practice = mode === 'PRACTICE';
+  const usingModel = getPostureModel() !== null;
+
+  const rateText: Record<RateState, StringKey> = {
+    WAIT: 'fbWaiting',
+    MEASURING: 'fbMeasuring',
+    LOW: 'fbRateLow',
+    OK: 'fbRateOk',
+    HIGH: 'fbRateHigh',
+  };
+
+  const postureText = (p: PostureState): StringKey | null => {
+    if (p === 'LOST') return 'fbNoArm';
+    if (p === 'BENT_ELBOW') return 'fbBent';
+    if (p === 'OFF_AXIS') return 'fbOffAxis';
+    return 'fbPostureOk';
+  };
+
+  const rateClass =
+    hud.rate === 'OK'
+      ? 'good'
+      : hud.rate === 'LOW' || hud.rate === 'HIGH'
+        ? 'warn'
+        : 'idle';
+  const postureClass =
+    hud.posture === 'CORRECT_POSTURE'
+      ? 'good'
+      : hud.posture === 'LOST'
+        ? 'idle'
+        : 'warn';
+  const pText = postureText(hud.posture);
+
+
+  const stageStatus = !hud.tracking
+    ? ''
+    : postureClass === 'warn' || rateClass === 'warn'
+      ? 'stage-warn'
+      : 'stage-good';
+
+  const GAUGE_MIN = 60;
+  const GAUGE_MAX = 160;
+  const gaugeSpan = GAUGE_MAX - GAUGE_MIN;
+  const toPct = (v: number) => ((v - GAUGE_MIN) / gaugeSpan) * 100;
+  const targetLeftPct = toPct(TARGET_BPM_MIN);
+  const targetRightPct = toPct(TARGET_BPM_MAX);
+  const bpmPct =
+    hud.bpm !== null ? Math.max(0, Math.min(100, toPct(hud.bpm))) : null;
+  const gaugeTicks = [60, 80, 100, 120, 140, 160];
+
+  const badgeState =
+    engine.status === 'ERROR'
+      ? 'error'
+      : engine.status === 'LOADING'
+        ? 'loading'
+        : hud.tracking
+          ? 'tracking'
+          : 'ready';
+  const backend = engine.cpu ? 'CPU' : 'GPU';
+  const badgeLabel =
+    engine.status === 'ERROR'
+      ? t('aiError')
+      : engine.status === 'LOADING'
+        ? t('aiLoading')
+        : `${hud.tracking ? t('aiTracking') : t('aiReady')} · ${backend}`;
+
+  const sessionRunning = hud.phase !== 'IDLE';
+
+  const modeSwitch = (
+    <div className="mode-switch" role="tablist" aria-label={t('modeSwitchLabel')}>
+      <button
+        type="button"
+        role="tab"
+        aria-selected={practice}
+        className={practice ? 'active practice' : ''}
+        onClick={() => switchMode('PRACTICE')}
+      >
+        <IconActivity size={16} />
+        {t('modePractice')}
+      </button>
+      <button
+        type="button"
+        role="tab"
+        aria-selected={!practice}
+        className={!practice ? 'active emergency' : ''}
+        onClick={() => switchMode('EMERGENCY')}
+        title={t('modeEmergency')}
+      >
+        <IconHeartPulse size={16} />
+        {t('modeEmergencyShort')}
+      </button>
+    </div>
+  );
+
+  const rateCard = (
+    <section className={`card bpm-card tone-${rateClass}`} aria-labelledby="bpm-card-title">
+      <header className="card-head">
+        <h2 id="bpm-card-title" className="card-title">
+          {t('cardLiveRate')}
+        </h2>
+        <span className={`pill tone-${rateClass}`}>{t(`rate${hud.rate}` as StringKey)}</span>
+      </header>
+      <div className="bpm-readout" aria-live="off">
+        <span className={`bpm-value num tone-${rateClass}`}>{hud.bpm ?? '--'}</span>
+        <span className="bpm-unit">{t('hudBpmUnit')}</span>
+      </div>
+      <div
+        className="bpm-gauge"
+        role="meter"
+        aria-label={t('gaugeLabel')}
+        aria-valuemin={GAUGE_MIN}
+        aria-valuemax={GAUGE_MAX}
+        aria-valuenow={hud.bpm ?? undefined}
+      >
+        <div className="bpm-track">
+          <span className="bpm-zone zone-slow" style={{ left: 0, width: `${targetLeftPct}%` }} />
+          <span
+            className="bpm-zone zone-target"
+            style={{ left: `${targetLeftPct}%`, width: `${targetRightPct - targetLeftPct}%` }}
+          />
+          <span
+            className="bpm-zone zone-fast"
+            style={{ left: `${targetRightPct}%`, width: `${100 - targetRightPct}%` }}
+          />
+          {bpmPct !== null && <span className={`bpm-needle tone-${rateClass}`} style={{ left: `${bpmPct}%` }} />}
+        </div>
+        <div className="bpm-ticks num" aria-hidden="true">
+          {gaugeTicks.map((v) => (
+            <span key={v} style={{ left: `${toPct(v)}%` }}>
+              {v}
+            </span>
+          ))}
+        </div>
+        <div className="bpm-zone-labels" aria-hidden="true">
+          <span>{t('zoneSlow')}</span>
+          <span className="tone-good">
+            {t('zoneTarget')} {TARGET_BPM_MIN}–{TARGET_BPM_MAX}
+          </span>
+          <span>{t('zoneFast')}</span>
+        </div>
+      </div>
+      <div className={`fb tone-${rateClass}`}>
+        <span className="fb-tag">{t('lblRate')}</span>
+        <span>{t(rateText[hud.rate])}</span>
+      </div>
+    </section>
+  );
+
+  const postureCard = practice && (
+    <section className="card posture-card" aria-labelledby="posture-card-title">
+      <header className="card-head">
+        <h2 id="posture-card-title" className="card-title">
+          {t('cardPosture')}
+        </h2>
+        <span className="pill tone-idle num">FPS {hud.fps}</span>
+      </header>
+      <div className="metric-grid">
+        <div className={`metric tone-${!hud.tracking ? 'idle' : hud.posture === 'BENT_ELBOW' ? 'warn' : 'good'}`}>
+          <span className="metric-label">{t('hudElbow')}</span>
+          <span className="metric-value num">{hud.tracking ? `${hud.elbow}°` : '--'}</span>
+        </div>
+        <div className={`metric tone-${!hud.tracking ? 'idle' : hud.posture === 'OFF_AXIS' ? 'warn' : 'good'}`}>
+          <span className="metric-label">{t('hudOffset')}</span>
+          <span className="metric-value num">{hud.tracking ? hud.offset : '--'}</span>
+        </div>
+      </div>
+      {pText && (
+        <div className={`fb tone-${postureClass}`}>
+          <span className="fb-tag">{t('lblPosture')}</span>
+          <span>{t(pText)}</span>
+        </div>
+      )}
+      <p className="hud-source">{usingModel ? t('hudClassifierModel') : t('hudClassifierThreshold')}</p>
+    </section>
+  );
+
+  return (
+    <div className={`tracker ${practice ? 'mode-practice' : 'mode-emergency'}`}>
+      {modeSlot ? createPortal(modeSwitch, modeSlot) : modeSwitch}
+
+      {(engine.errorKey || engine.cpu || audioMissing || (engine.status === 'READY' && hud.fps > 0 && hud.fps < 15)) && (
+        <div className="banners">
+          {engine.errorKey && (
+            <div className="banner error" role="alert">
+              <IconAlert />
+              <span>{t(engine.errorKey)}</span>
+            </div>
+          )}
+          {engine.cpu && (
+            <div className="banner note">
+              <IconInfo />
+              <span>{t('noteCpuFallback')}</span>
+            </div>
+          )}
+          {audioMissing && (
+            <div className="banner note">
+              <IconInfo />
+              <span>{t('warnAudioMissing')}</span>
+            </div>
+          )}
+          {engine.status === 'READY' && hud.fps > 0 && hud.fps < 15 && (
+            <div className="banner note">
+              <IconAlert />
+              <span>{t('warnLowFps')}</span>
+            </div>
+          )}
+        </div>
+      )}
+
+      {!practice && (
+        <EmergencyActions t={t} metronomeOn={metronomeOn} onToggleMetronome={toggleMetronome} />
+      )}
+
+      <div className="cockpit">
+        <div className="cockpit-main">
+          {!practice && <h2 className="section-label">{t('emCameraTitle')}</h2>}
+          <div className={`stage ${stageStatus}`}>
+            <span className="stage-corner tl" aria-hidden="true" />
+            <span className="stage-corner tr" aria-hidden="true" />
+            <span className="stage-corner bl" aria-hidden="true" />
+            <span className="stage-corner br" aria-hidden="true" />
+
+            <div className={`stage-badge ${badgeState}`}>
+              <span className="badge-dot" aria-hidden="true" />
+              {badgeLabel}
+            </div>
+            {engine.status === 'READY' && (
+              <div className="stage-fps num" aria-hidden="true">
+                {hud.fps} FPS
+              </div>
+            )}
+            {isVideoRecording && (
+              <div className="stage-rec">
+                <span className="rec-dot" aria-hidden="true" />
+                {t('recBadge')}
+              </div>
+            )}
+
+            {engine.status === 'LOADING' && (
+              <div className="stage-overlay">
+                <span className="spinner" aria-hidden="true" />
+                <strong>{t('loadingModel')}</strong>
+                <span className="muted">{t('stageAwaitHint')}</span>
+              </div>
+            )}
+            {engine.status === 'ERROR' && (
+              <div className="stage-overlay error">
+                <IconCamera size={32} />
+                <strong>{t('stageErrorTitle')}</strong>
+                {engine.errorKey && <span className="muted">{t(engine.errorKey)}</span>}
+              </div>
+            )}
+
+            <canvas ref={canvasRef} className="stage-canvas" />
+            <video ref={videoRef} className="stage-video" playsInline muted />
+
+            {hud.phase === 'COUNTDOWN' && (
+              <div className="stage-count" aria-live="assertive">
+                <span className="num" key={hud.secondsLeft}>
+                  {hud.secondsLeft}
+                </span>
+                <small>{t('getReady')}</small>
+              </div>
+            )}
+            {hud.phase === 'ACTIVE' && (
+              <div className="stage-timer">
+                <span className="muted">{t('timeLeft')}</span>
+                <strong className="num">{hud.secondsLeft}s</strong>
+              </div>
+            )}
+          </div>
+
+          {practice && (
+            <div className="dock" role="toolbar" aria-label={t('controlsLabel')}>
+              <div className="dock-primary">
+                {!sessionRunning ? (
+                  <button
+                    type="button"
+                    className="btn btn-primary btn-lg"
+                    onClick={startSession}
+                    disabled={engine.status !== 'READY'}
+                  >
+                    <IconPlay />
+                    {t('startSession')}
+                  </button>
+                ) : (
+                  <button type="button" className="btn btn-warn btn-lg" onClick={stopSession}>
+                    <IconStop />
+                    {t('stopEarly')} (<span className="num">{hud.secondsLeft}s</span>)
+                  </button>
+                )}
+                <button
+                  type="button"
+                  className={`btn btn-secondary ${metronomeOn ? 'on' : ''}`}
+                  onClick={toggleMetronome}
+                  aria-pressed={metronomeOn}
+                >
+                  <IconActivity />
+                  {metronomeOn ? t('metronomeOff') : t('metronomeOn')}
+                </button>
+                {!isVideoRecording ? (
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    onClick={startVideoRecording}
+                    disabled={engine.status !== 'READY'}
+                  >
+                    <IconRecord className="icon-rec" />
+                    {t('recordVideo')}
+                  </button>
+                ) : (
+                  <button type="button" className="btn btn-danger" onClick={stopVideoRecording}>
+                    <IconStop />
+                    {t('stopReview')}
+                  </button>
+                )}
+                <button type="button" className="btn btn-ghost" onClick={() => setShowGuide(true)}>
+                  <IconFilm />
+                  {t('videoGuide')}
+                </button>
+                {summary && !summaryOpen && (
+                  <button type="button" className="btn btn-ghost" onClick={() => setSummaryOpen(true)}>
+                    <IconAward />
+                    {t('sumView')}
+                  </button>
+                )}
+              </div>
+              <div className="dock-toggles">
+                <label className="switch" title={t('showCamera')}>
+                  <input
+                    type="checkbox"
+                    role="switch"
+                    checked={showCamera}
+                    onChange={(e) => setShowCamera(e.target.checked)}
+                  />
+                  <span className="switch-track" aria-hidden="true" />
+                  <span>{t('toggleCamera')}</span>
+                </label>
+                <label className="switch">
+                  <input
+                    type="checkbox"
+                    role="switch"
+                    checked={show3dMesh}
+                    onChange={(e) => setShow3dMesh(e.target.checked)}
+                  />
+                  <span className="switch-track" aria-hidden="true" />
+                  <span>{t('toggleMesh')}</span>
+                </label>
+              </div>
+            </div>
+          )}
+
+          {practice && recordedUrl && (
+            <section className="card replay-card" ref={replayRef} aria-labelledby="replay-title">
+              <header className="card-head">
+                <h2 id="replay-title" className="card-title">
+                  <IconFilm size={16} />
+                  {t('recordedTitle')}
+                </h2>
+              </header>
+              <video src={recordedUrl} controls playsInline className="replay-video" />
+              <p className="muted small">{t('recordedHint')}</p>
+              <div className="replay-actions">
+                <a href={recordedUrl} download={`cpr-practice-${Date.now()}.webm`} className="btn btn-secondary">
+                  <IconDownload />
+                  {t('downloadVideo')}
+                </a>
+                <button
+                  type="button"
+                  className="btn btn-ghost danger-text"
+                  onClick={() => {
+                    URL.revokeObjectURL(recordedUrl);
+                    setRecordedUrl(null);
+                  }}
+                >
+                  <IconTrash />
+                  {t('deleteVideo')}
+                </button>
+              </div>
+            </section>
+          )}
+        </div>
+
+        <aside className="cockpit-side">
+          {rateCard}
+          {postureCard}
+          {coachSlot && <div className="coach-dock">{coachSlot}</div>}
+        </aside>
+      </div>
+
+      {!practice && <EmergencySteps t={t} />}
+
+      {practice && (
+        <div className="lower-grid">
+          <HistoryPanel
+            lang={lang}
+            entries={history}
+            onDelete={(id) => setHistory(deleteHistoryEntry(id))}
+            onClear={() => setHistory(clearHistory())}
+          />
+          <RecorderPanel
+            t={t}
+            meta={recMeta}
+            onMeta={setRecMeta}
+            isRecording={isRecording}
+            rows={hud.rows}
+            taps={hud.taps}
+            onToggle={toggleRecording}
+            onTap={tapGroundTruth}
+            onDownload={() => recorder.download(recMeta.subjectId)}
+            onClear={() => recorder.clear()}
+          />
+        </div>
+      )}
+
+      {practice && summary && summaryOpen && (
+        <div className="modal-backdrop" onClick={() => setSummaryOpen(false)}>
+          <div
+            className="modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="sum-title"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <SummaryCard
+              t={t}
+              s={summary}
+              onClose={() => setSummaryOpen(false)}
+              onPracticeAgain={
+                engine.status === 'READY'
+                  ? () => {
+                      setSummaryOpen(false);
+                      startSession();
+                    }
+                  : undefined
+              }
+              onReviewVideo={
+                recordedUrl
+                  ? () => {
+                      setSummaryOpen(false);
+                      replayRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    }
+                  : undefined
+              }
+            />
+          </div>
+        </div>
+      )}
+
+      {practice && showGuide && (
+        <div className="modal-backdrop" onClick={() => setShowGuide(false)}>
+          <div
+            className="modal modal-wide"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="guide-title"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <header className="modal-head">
+              <h2 id="guide-title">{t('guideTitle')}</h2>
+              <button type="button" className="btn-icon" onClick={() => setShowGuide(false)} aria-label={t('close')}>
+                <IconX />
+              </button>
+            </header>
+            <video src={asset('cpr-guide.mp4')} controls playsInline className="guide-video" />
+            <ul className="guide-tips">
+              <li>
+                <span className="guide-num num">01</span>
+                <div>
+                  <strong>{t('guideHandTitle')}</strong>
+                  <p>{t('guideHand')}</p>
+                </div>
+              </li>
+              <li>
+                <span className="guide-num num">02</span>
+                <div>
+                  <strong>{t('guidePostureTitle')}</strong>
+                  <p>{t('guidePosture')}</p>
+                </div>
+              </li>
+              <li>
+                <span className="guide-num num">03</span>
+                <div>
+                  <strong>{t('guideCameraTitle')}</strong>
+                  <p>{t('guideCamera')}</p>
+                </div>
+              </li>
+            </ul>
+          </div>
+        </div>
+      )}
+
+      <p className="limits">
+        <IconInfo size={16} />
+        <span>{t('limits')}</span>
+      </p>
+    </div>
+  );
+}
+
+export default PoseTracker;
