@@ -18,7 +18,7 @@
 [![Privacy](https://img.shields.io/badge/Video-never%20uploaded-16A34A?style=flat-square)](#7-privacy)
 [![Status](https://img.shields.io/badge/Status-Prototype%20v0.2.0-F59E0B?style=flat-square)](#10-honest-status--limitations)
 
-[🚀 Quick Start](#5-quick-start) • [✨ Features](#2-features) • [🧠 Algorithms](#3-how-it-works) • [🏗️ Structure](#4-project-structure) • [🔒 Privacy](#7-privacy) • [⚠️ Limitations](#10-honest-status--limitations)
+[🌐 Live Demo](https://lifeassist-cpr-pi.vercel.app/) • [✨ Features](#2-features) • [🧠 Algorithms](#3-how-it-works) • [🏗️ Structure](#4-project-structure) • [🚀 Quick Start](#5-quick-start) • [🔒 Privacy](#7-privacy) • [⚠️ Limitations](#10-honest-status--limitations)
 
 </div>
 
