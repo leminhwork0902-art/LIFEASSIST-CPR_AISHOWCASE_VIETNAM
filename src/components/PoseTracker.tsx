@@ -36,6 +36,15 @@ import { EmergencyPanel } from './EmergencyPanel.tsx';
 import { RecorderPanel } from './RecorderPanel.tsx';
 import { SummaryCard } from './SummaryCard.tsx';
 import type { CoachState } from '../lib/coachAudio.ts';
+import { HistoryPanel } from './HistoryPanel.tsx';
+import {
+  appendHistory,
+  clearHistory,
+  deleteHistoryEntry,
+  loadHistory,
+  type HistoryEntry,
+} from '../lib/historyStorage.ts';
+import { syncSessionToSheets } from '../lib/sheetsSync.ts';
 
 type AppMode = 'PRACTICE' | 'EMERGENCY';
 type Phase = 'IDLE' | 'COUNTDOWN' | 'ACTIVE';
@@ -145,6 +154,7 @@ export function PoseTracker({ lang, onCoachStatusChange }: Props) {
   const [audioMissing, setAudioMissing] = useState(false);
   const [hud, setHud] = useState<Hud>(INITIAL_HUD);
   const [summary, setSummary] = useState<SessionSummary | null>(null);
+  const [history, setHistory] = useState<HistoryEntry[]>(() => loadHistory());
   const [metronomeOn, setMetronomeOn] = useState(false);
   const [showCamera, setShowCamera] = useState(true);
   const [show3dMesh, setShow3dMesh] = useState(true);
@@ -244,7 +254,12 @@ export function PoseTracker({ lang, onCoachStatusChange }: Props) {
         1,
         Math.min(SESSION_SECONDS, (now - s.startedAt) / 1000)
       );
-      setSummary(scorerRef.current.summarize(elapsed));
+      const result = scorerRef.current.summarize(elapsed);
+      setSummary(result);
+      if (result.totalCompressions > 0) {
+        setHistory(appendHistory(result));
+        void syncSessionToSheets(result, recMetaRef.current);
+      }
     }
     sessionRef.current = { phase: 'IDLE', phaseEndsAt: 0, startedAt: 0 };
   };
@@ -962,7 +977,15 @@ export function PoseTracker({ lang, onCoachStatusChange }: Props) {
       )}
 
       {practice && summary && <SummaryCard t={t} s={summary} />}
-
+      
+      {practice && (
+      <HistoryPanel
+        lang={lang}
+        entries={history}
+        onDelete={(id) => setHistory(deleteHistoryEntry(id))}
+        onClear={() => setHistory(clearHistory())}
+      />
+    )}
       {practice && showGuide && (
         <div className="guide-panel">
           <div className="guide-header">
