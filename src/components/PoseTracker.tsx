@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
+import type { ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import * as THREE from 'three';
 import { PoseLandmarker, DrawingUtils } from '@mediapipe/tasks-vision';
 import type { NormalizedLandmark } from '@mediapipe/tasks-vision';
@@ -32,7 +34,22 @@ import type { SessionSummary } from '../lib/sessionScorer.ts';
 import { DualArmHandTracker } from '../tracking/DualArmHandTracker.ts';
 import { ProceduralArmHandRig } from '../tracking/ProceduralArmHandMesh.ts';
 import type { TrackResult } from '../tracking/types.ts';
-import { EmergencyPanel } from './EmergencyPanel.tsx';
+import { EmergencyActions, EmergencySteps } from './EmergencyPanel.tsx';
+import {
+  IconActivity,
+  IconAlert,
+  IconAward,
+  IconCamera,
+  IconDownload,
+  IconFilm,
+  IconHeartPulse,
+  IconInfo,
+  IconPlay,
+  IconRecord,
+  IconStop,
+  IconTrash,
+  IconX,
+} from './Icons.tsx';
 import { RecorderPanel } from './RecorderPanel.tsx';
 import { SummaryCard } from './SummaryCard.tsx';
 import type { CoachState } from '../lib/coachAudio.ts';
@@ -123,11 +140,21 @@ interface Props {
     isActiveSession: boolean;
     externalSpeaking: boolean;
   }) => void;
+  /** Phần tử (vd. AI Coach) được gắn vào cột phải của bảng điều khiển. */
+  coachSlot?: ReactNode;
+  /** id của phần tử trên header để chèn bộ chuyển chế độ. */
+  modeSlotId?: string;
 }
 
-export function PoseTracker({ lang, onCoachStatusChange }: Props) {
+export function PoseTracker({ lang, onCoachStatusChange, coachSlot, modeSlotId }: Props) {
   const t = tr(lang);
-  const isEn = lang === 'en';
+  const [modeSlot, setModeSlot] = useState<HTMLElement | null>(null);
+  const [summaryOpen, setSummaryOpen] = useState(false);
+  const replayRef = useRef<HTMLElement | null>(null);
+
+  useEffect(() => {
+    setModeSlot(modeSlotId ? document.getElementById(modeSlotId) : null);
+  }, [modeSlotId]);
 
   // ---- DOM / engine objects (ổn định giữa các lần render)
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -816,6 +843,21 @@ export function PoseTracker({ lang, onCoachStatusChange }: Props) {
     };
   }, [recordedUrl]);
 
+  useEffect(() => {
+    setSummaryOpen(summary !== null);
+  }, [summary]);
+
+  useEffect(() => {
+    if (!showGuide && !summaryOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      setShowGuide(false);
+      setSummaryOpen(false);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [showGuide, summaryOpen]);
+
   // ---- Hiển thị
   const practice = mode === 'PRACTICE';
   const usingModel = getPostureModel() !== null;
@@ -849,25 +891,23 @@ export function PoseTracker({ lang, onCoachStatusChange }: Props) {
         : 'warn';
   const pText = postureText(hud.posture);
 
-  // Trạng thái viền camera phát sáng theo tư thế / nhịp
+
   const stageStatus = !hud.tracking
     ? ''
     : postureClass === 'warn' || rateClass === 'warn'
       ? 'stage-warn'
       : 'stage-good';
 
-  // Tính vị trí thanh đo nhịp BPM (thang đo 60 -> 160 BPM)
   const GAUGE_MIN = 60;
   const GAUGE_MAX = 160;
   const gaugeSpan = GAUGE_MAX - GAUGE_MIN;
-  const targetLeftPct = ((TARGET_BPM_MIN - GAUGE_MIN) / gaugeSpan) * 100;
-  const targetWidthPct = ((TARGET_BPM_MAX - TARGET_BPM_MIN) / gaugeSpan) * 100;
+  const toPct = (v: number) => ((v - GAUGE_MIN) / gaugeSpan) * 100;
+  const targetLeftPct = toPct(TARGET_BPM_MIN);
+  const targetRightPct = toPct(TARGET_BPM_MAX);
   const bpmPct =
-    hud.bpm !== null
-      ? Math.max(0, Math.min(100, ((hud.bpm - GAUGE_MIN) / gaugeSpan) * 100))
-      : null;
+    hud.bpm !== null ? Math.max(0, Math.min(100, toPct(hud.bpm))) : null;
+  const gaugeTicks = [60, 80, 100, 120, 140, 160];
 
-  // Badge trạng thái AI ở góc trên bên trái camera
   const badgeState =
     engine.status === 'ERROR'
       ? 'error'
@@ -876,360 +916,444 @@ export function PoseTracker({ lang, onCoachStatusChange }: Props) {
         : hud.tracking
           ? 'tracking'
           : 'ready';
-
+  const backend = engine.cpu ? 'CPU' : 'GPU';
   const badgeLabel =
     engine.status === 'ERROR'
-      ? isEn
-        ? 'AI ERROR'
-        : 'LỖI AI'
+      ? t('aiError')
       : engine.status === 'LOADING'
-        ? isEn
-          ? 'LOADING AI...'
-          : 'ĐANG TẢI AI...'
-        : hud.tracking
-          ? `${isEn ? 'AI TRACKING' : 'AI ĐANG THEO DÕI'} · ${engine.cpu ? 'CPU' : 'GPU'}`
-          : `${isEn ? 'AI READY' : 'AI SẴN SÀNG'} · ${engine.cpu ? 'CPU' : 'GPU'}`;
+        ? t('aiLoading')
+        : `${hud.tracking ? t('aiTracking') : t('aiReady')} · ${backend}`;
+
+  const sessionRunning = hud.phase !== 'IDLE';
+
+  const modeSwitch = (
+    <div className="mode-switch" role="tablist" aria-label={t('modeSwitchLabel')}>
+      <button
+        type="button"
+        role="tab"
+        aria-selected={practice}
+        className={practice ? 'active practice' : ''}
+        onClick={() => switchMode('PRACTICE')}
+      >
+        <IconActivity size={16} />
+        {t('modePractice')}
+      </button>
+      <button
+        type="button"
+        role="tab"
+        aria-selected={!practice}
+        className={!practice ? 'active emergency' : ''}
+        onClick={() => switchMode('EMERGENCY')}
+        title={t('modeEmergency')}
+      >
+        <IconHeartPulse size={16} />
+        {t('modeEmergencyShort')}
+      </button>
+    </div>
+  );
+
+  const rateCard = (
+    <section className={`card bpm-card tone-${rateClass}`} aria-labelledby="bpm-card-title">
+      <header className="card-head">
+        <h2 id="bpm-card-title" className="card-title">
+          {t('cardLiveRate')}
+        </h2>
+        <span className={`pill tone-${rateClass}`}>{t(`rate${hud.rate}` as StringKey)}</span>
+      </header>
+      <div className="bpm-readout" aria-live="off">
+        <span className={`bpm-value num tone-${rateClass}`}>{hud.bpm ?? '--'}</span>
+        <span className="bpm-unit">{t('hudBpmUnit')}</span>
+      </div>
+      <div
+        className="bpm-gauge"
+        role="meter"
+        aria-label={t('gaugeLabel')}
+        aria-valuemin={GAUGE_MIN}
+        aria-valuemax={GAUGE_MAX}
+        aria-valuenow={hud.bpm ?? undefined}
+      >
+        <div className="bpm-track">
+          <span className="bpm-zone zone-slow" style={{ left: 0, width: `${targetLeftPct}%` }} />
+          <span
+            className="bpm-zone zone-target"
+            style={{ left: `${targetLeftPct}%`, width: `${targetRightPct - targetLeftPct}%` }}
+          />
+          <span
+            className="bpm-zone zone-fast"
+            style={{ left: `${targetRightPct}%`, width: `${100 - targetRightPct}%` }}
+          />
+          {bpmPct !== null && <span className={`bpm-needle tone-${rateClass}`} style={{ left: `${bpmPct}%` }} />}
+        </div>
+        <div className="bpm-ticks num" aria-hidden="true">
+          {gaugeTicks.map((v) => (
+            <span key={v} style={{ left: `${toPct(v)}%` }}>
+              {v}
+            </span>
+          ))}
+        </div>
+        <div className="bpm-zone-labels" aria-hidden="true">
+          <span>{t('zoneSlow')}</span>
+          <span className="tone-good">
+            {t('zoneTarget')} {TARGET_BPM_MIN}–{TARGET_BPM_MAX}
+          </span>
+          <span>{t('zoneFast')}</span>
+        </div>
+      </div>
+      <div className={`fb tone-${rateClass}`}>
+        <span className="fb-tag">{t('lblRate')}</span>
+        <span>{t(rateText[hud.rate])}</span>
+      </div>
+    </section>
+  );
+
+  const postureCard = practice && (
+    <section className="card posture-card" aria-labelledby="posture-card-title">
+      <header className="card-head">
+        <h2 id="posture-card-title" className="card-title">
+          {t('cardPosture')}
+        </h2>
+        <span className="pill tone-idle num">FPS {hud.fps}</span>
+      </header>
+      <div className="metric-grid">
+        <div className={`metric tone-${!hud.tracking ? 'idle' : hud.posture === 'BENT_ELBOW' ? 'warn' : 'good'}`}>
+          <span className="metric-label">{t('hudElbow')}</span>
+          <span className="metric-value num">{hud.tracking ? `${hud.elbow}°` : '--'}</span>
+        </div>
+        <div className={`metric tone-${!hud.tracking ? 'idle' : hud.posture === 'OFF_AXIS' ? 'warn' : 'good'}`}>
+          <span className="metric-label">{t('hudOffset')}</span>
+          <span className="metric-value num">{hud.tracking ? hud.offset : '--'}</span>
+        </div>
+      </div>
+      {pText && (
+        <div className={`fb tone-${postureClass}`}>
+          <span className="fb-tag">{t('lblPosture')}</span>
+          <span>{t(pText)}</span>
+        </div>
+      )}
+      <p className="hud-source">{usingModel ? t('hudClassifierModel') : t('hudClassifierThreshold')}</p>
+    </section>
+  );
 
   return (
-    <div className="tracker">
-      <div className="mode-switch" role="tablist">
-        <button
-          type="button"
-          role="tab"
-          aria-selected={practice}
-          className={practice ? 'active practice' : ''}
-          onClick={() => switchMode('PRACTICE')}
-        >
-          {t('modePractice')}
-        </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={!practice}
-          className={!practice ? 'active emergency' : ''}
-          onClick={() => switchMode('EMERGENCY')}
-        >
-          {t('modeEmergency')}
-        </button>
-      </div>
+    <div className={`tracker ${practice ? 'mode-practice' : 'mode-emergency'}`}>
+      {modeSlot ? createPortal(modeSwitch, modeSlot) : modeSwitch}
 
-      {!practice && (
-        <EmergencyPanel
-          t={t}
-          metronomeOn={metronomeOn}
-          onToggleMetronome={toggleMetronome}
-        />
-      )}
-
-      {practice && (
-        <div className="session-bar">
-          {hud.phase === 'IDLE' ? (
-            <button
-              type="button"
-              className="btn-primary"
-              onClick={startSession}
-              disabled={engine.status !== 'READY'}
-            >
-              {t('startSession')}
-            </button>
-          ) : (
-            <button type="button" className="btn-warn" onClick={stopSession}>
-              {t('stopEarly')} ({hud.secondsLeft}s)
-            </button>
+      {(engine.errorKey || engine.cpu || audioMissing || (engine.status === 'READY' && hud.fps > 0 && hud.fps < 15)) && (
+        <div className="banners">
+          {engine.errorKey && (
+            <div className="banner error" role="alert">
+              <IconAlert />
+              <span>{t(engine.errorKey)}</span>
+            </div>
           )}
-          <button
-            type="button"
-            className={`btn-secondary ${metronomeOn ? 'on' : ''}`}
-            onClick={toggleMetronome}
-          >
-            {metronomeOn ? t('metronomeOff') : t('metronomeOn')}
-          </button>
-          <button
-            type="button"
-            className={`btn-secondary ${showGuide ? 'on' : ''}`}
-            onClick={() => setShowGuide((v) => !v)}
-          >
-            {showGuide
-              ? isEn
-                ? '✕ Hide guide'
-                : '✕ Ẩn hướng dẫn'
-              : isEn
-                ? '▶ Video guide'
-                : '▶ Video hướng dẫn'}
-          </button>
-          <label className="check">
-            <input
-              type="checkbox"
-              checked={showCamera}
-              onChange={(e) => setShowCamera(e.target.checked)}
-            />
-            {t('showCamera')}
-          </label>
-          <label className="check">
-            <input
-              type="checkbox"
-              checked={show3dMesh}
-              onChange={(e) => setShow3dMesh(e.target.checked)}
-            />
-            {isEn ? '3D Arm Mesh' : 'Lưới 3D tay'}
-          </label>
-        </div>
-      )}
-
-      {practice && summary && <SummaryCard t={t} s={summary} />}
-      
-      {practice && (
-      <HistoryPanel
-        lang={lang}
-        entries={history}
-        onDelete={(id) => setHistory(deleteHistoryEntry(id))}
-        onClear={() => setHistory(clearHistory())}
-      />
-    )}
-      {practice && showGuide && (
-        <div className="guide-panel">
-          <div className="guide-header">
-            <h4>
-              {isEn
-                ? 'Posture & camera setup guide'
-                : 'Hướng dẫn tư thế & đặt camera'}
-            </h4>
-            <button
-              type="button"
-              className="btn-close-guide"
-              onClick={() => setShowGuide(false)}
-            >
-              {isEn ? '✕ Close' : '✕ Đóng'}
-            </button>
-          </div>
-          <video
-            src={asset('cpr-guide.mp4')}
-            controls
-            playsInline
-            className="guide-video"
-          />
-          {isEn ? (
-            <ul className="guide-tips">
-              <li>
-                <strong>Hand placement:</strong> Place the heel of one hand in
-                the center of the chest (lower half of the breastbone), with
-                your other hand interlocked on top.
-              </li>
-              <li>
-                <strong>Posture:</strong> Keep your elbows locked straight and
-                your shoulders positioned directly over your hands.
-              </li>
-              <li>
-                <strong>Camera angle:</strong> Position the camera at a 90°
-                side profile for the most accurate AI arm tracking.
-              </li>
-            </ul>
-          ) : (
-            <ul className="guide-tips">
-              <li>
-                <strong>Đặt tay:</strong> Gót bàn tay ở giữa ngực (1/2 dưới
-                xương ức), đan hai tay vào nhau.
-              </li>
-              <li>
-                <strong>Tư thế:</strong> Duỗi thẳng khuỷu tay, vai vuông góc
-                thẳng trục với bàn tay.
-              </li>
-              <li>
-                <strong>Góc camera:</strong> Đặt camera nhìn nghiêng 90° bên
-                hông để AI nhận diện cánh tay chính xác nhất.
-              </li>
-            </ul>
+          {engine.cpu && (
+            <div className="banner note">
+              <IconInfo />
+              <span>{t('noteCpuFallback')}</span>
+            </div>
           )}
-        </div>
-      )}
-
-      {engine.errorKey && (
-        <div className="banner error">{t(engine.errorKey)}</div>
-      )}
-      {engine.cpu && (
-        <div className="banner note">{t('noteCpuFallback')}</div>
-      )}
-      {audioMissing && (
-        <div className="banner note">{t('warnAudioMissing')}</div>
-      )}
-      {engine.status === 'READY' && hud.fps > 0 && hud.fps < 15 && (
-        <div className="banner note">{t('warnLowFps')}</div>
-      )}
-
-      <div className={`stage ${stageStatus}`}>
-        <div className={`stage-badge ${badgeState}`}>
-          <span className="badge-dot" />
-          {badgeLabel}
-        </div>
-        {engine.status === 'LOADING' && (
-          <div className="stage-loading">{t('loadingModel')}</div>
-        )}
-        <canvas ref={canvasRef} className="stage-canvas" />
-        <video ref={videoRef} className="stage-video" playsInline muted />
-        {hud.phase === 'COUNTDOWN' && (
-          <div className="stage-count" aria-live="assertive">
-            <span>{hud.secondsLeft}</span>
-            <small>{t('getReady')}</small>
-          </div>
-        )}
-        {hud.phase === 'ACTIVE' && (
-          <div className="stage-timer">
-            {t('timeLeft')}: <strong>{hud.secondsLeft}s</strong>
-          </div>
-        )}
-      </div>
-
-      <div className="video-record-bar">
-        {!isVideoRecording ? (
-          <button
-            type="button"
-            className="btn-record"
-            onClick={startVideoRecording}
-            disabled={engine.status !== 'READY'}
-          >
-            {isEn ? '● Record video' : '● Bắt đầu ghi hình'}
-          </button>
-        ) : (
-          <button
-            type="button"
-            className="btn-stop"
-            onClick={stopVideoRecording}
-          >
-            {isEn ? '■ Stop & Review' : '■ Dừng & Xem lại'}
-          </button>
-        )}
-      </div>
-
-      {recordedUrl && (
-        <div className="replay-section">
-          <h4>{isEn ? 'Recorded practice' : 'Video vừa tập'}</h4>
-          <video src={recordedUrl} controls className="replay-video" />
-          <div className="replay-actions">
-            <a
-              href={recordedUrl}
-              download={`cpr-practice-${Date.now()}.webm`}
-              className="btn-download"
-            >
-              {isEn ? 'Download video' : 'Tải video về máy'}
-            </a>
-            <button
-              type="button"
-              className="btn-clear"
-              onClick={() => {
-                URL.revokeObjectURL(recordedUrl);
-                setRecordedUrl(null);
-              }}
-            >
-              {isEn ? 'Delete video' : 'Xóa video'}
-            </button>
-          </div>
-        </div>
-      )}
-
-      <div className="hud">
-        <div className="hud-metrics">
-          <div className="metric">
-            <span className="metric-label">{t('hudRate')}</span>
-            <span className={`metric-value big ${rateClass}`}>
-              {hud.bpm ?? '-'} <small>{t('hudBpmUnit')}</small>
-            </span>
-            <span className="metric-sub">
-              {t('hudTarget')}: {TARGET_BPM_MIN}-{TARGET_BPM_MAX}
-            </span>
-          </div>
-          {practice && (
-            <>
-              <div className="metric">
-                <span className="metric-label">{t('hudElbow')}</span>
-                <span
-                  className={`metric-value ${hud.posture === 'BENT_ELBOW' ? 'warn' : 'good'}`}
-                >
-                  {hud.tracking ? `${hud.elbow}°` : '-'}
-                </span>
-              </div>
-              <div className="metric">
-                <span className="metric-label">{t('hudOffset')}</span>
-                <span
-                  className={`metric-value ${hud.posture === 'OFF_AXIS' ? 'warn' : 'good'}`}
-                >
-                  {hud.tracking ? hud.offset : '-'}
-                </span>
-              </div>
-            </>
+          {audioMissing && (
+            <div className="banner note">
+              <IconInfo />
+              <span>{t('warnAudioMissing')}</span>
+            </div>
           )}
-          <div className="metric">
-            <span className="metric-label">FPS</span>
-            <span className="metric-value">{hud.fps}</span>
-          </div>
-        </div>
-
-        {/* Thanh đo nhịp BPM trực quan (Live BPM Gauge) */}
-        <div
-          className="bpm-gauge"
-          aria-label={isEn ? 'Live BPM Gauge' : 'Thanh đo nhịp BPM trực tiếp'}
-        >
-          <div className="bpm-track">
-            <div
-              className="bpm-target"
-              style={{
-                left: `${targetLeftPct}%`,
-                width: `${targetWidthPct}%`,
-              }}
-            />
-            {bpmPct !== null && (
-              <div
-                className={`bpm-needle ${rateClass}`}
-                style={{ left: `${bpmPct}%` }}
-              />
-            )}
-          </div>
-          <div className="bpm-ticks">
-            <span>{GAUGE_MIN}</span>
-            <span className="bpm-tick-target">
-              {TARGET_BPM_MIN}-{TARGET_BPM_MAX} BPM
-            </span>
-            <span>{GAUGE_MAX}</span>
-          </div>
-        </div>
-
-        <div className="hud-feedback">
-          <div className={`fb ${rateClass}`}>
-            <span className="fb-tag">{t('lblRate')}</span>
-            {t(rateText[hud.rate])}
-          </div>
-          {practice && pText && (
-            <div className={`fb ${postureClass}`}>
-              <span className="fb-tag">{t('lblPosture')}</span>
-              {t(pText)}
+          {engine.status === 'READY' && hud.fps > 0 && hud.fps < 15 && (
+            <div className="banner note">
+              <IconAlert />
+              <span>{t('warnLowFps')}</span>
             </div>
           )}
         </div>
-
-        {practice && (
-          <div className="hud-source">
-            {usingModel
-              ? t('hudClassifierModel')
-              : t('hudClassifierThreshold')}
-          </div>
-        )}
-      </div>
-
-      {practice && (
-        <RecorderPanel
-          t={t}
-          meta={recMeta}
-          onMeta={setRecMeta}
-          isRecording={isRecording}
-          rows={hud.rows}
-          taps={hud.taps}
-          onToggle={toggleRecording}
-          onTap={tapGroundTruth}
-          onDownload={() => recorder.download(recMeta.subjectId)}
-          onClear={() => recorder.clear()}
-        />
       )}
 
-      <p className="limits">{t('limits')}</p>
+      {!practice && (
+        <EmergencyActions t={t} metronomeOn={metronomeOn} onToggleMetronome={toggleMetronome} />
+      )}
+
+      <div className="cockpit">
+        <div className="cockpit-main">
+          {!practice && <h2 className="section-label">{t('emCameraTitle')}</h2>}
+          <div className={`stage ${stageStatus}`}>
+            <span className="stage-corner tl" aria-hidden="true" />
+            <span className="stage-corner tr" aria-hidden="true" />
+            <span className="stage-corner bl" aria-hidden="true" />
+            <span className="stage-corner br" aria-hidden="true" />
+
+            <div className={`stage-badge ${badgeState}`}>
+              <span className="badge-dot" aria-hidden="true" />
+              {badgeLabel}
+            </div>
+            {engine.status === 'READY' && (
+              <div className="stage-fps num" aria-hidden="true">
+                {hud.fps} FPS
+              </div>
+            )}
+            {isVideoRecording && (
+              <div className="stage-rec">
+                <span className="rec-dot" aria-hidden="true" />
+                {t('recBadge')}
+              </div>
+            )}
+
+            {engine.status === 'LOADING' && (
+              <div className="stage-overlay">
+                <span className="spinner" aria-hidden="true" />
+                <strong>{t('loadingModel')}</strong>
+                <span className="muted">{t('stageAwaitHint')}</span>
+              </div>
+            )}
+            {engine.status === 'ERROR' && (
+              <div className="stage-overlay error">
+                <IconCamera size={32} />
+                <strong>{t('stageErrorTitle')}</strong>
+                {engine.errorKey && <span className="muted">{t(engine.errorKey)}</span>}
+              </div>
+            )}
+
+            <canvas ref={canvasRef} className="stage-canvas" />
+            <video ref={videoRef} className="stage-video" playsInline muted />
+
+            {hud.phase === 'COUNTDOWN' && (
+              <div className="stage-count" aria-live="assertive">
+                <span className="num" key={hud.secondsLeft}>
+                  {hud.secondsLeft}
+                </span>
+                <small>{t('getReady')}</small>
+              </div>
+            )}
+            {hud.phase === 'ACTIVE' && (
+              <div className="stage-timer">
+                <span className="muted">{t('timeLeft')}</span>
+                <strong className="num">{hud.secondsLeft}s</strong>
+              </div>
+            )}
+          </div>
+
+          {practice && (
+            <div className="dock" role="toolbar" aria-label={t('controlsLabel')}>
+              <div className="dock-primary">
+                {!sessionRunning ? (
+                  <button
+                    type="button"
+                    className="btn btn-primary btn-lg"
+                    onClick={startSession}
+                    disabled={engine.status !== 'READY'}
+                  >
+                    <IconPlay />
+                    {t('startSession')}
+                  </button>
+                ) : (
+                  <button type="button" className="btn btn-warn btn-lg" onClick={stopSession}>
+                    <IconStop />
+                    {t('stopEarly')} (<span className="num">{hud.secondsLeft}s</span>)
+                  </button>
+                )}
+                <button
+                  type="button"
+                  className={`btn btn-secondary ${metronomeOn ? 'on' : ''}`}
+                  onClick={toggleMetronome}
+                  aria-pressed={metronomeOn}
+                >
+                  <IconActivity />
+                  {metronomeOn ? t('metronomeOff') : t('metronomeOn')}
+                </button>
+                {!isVideoRecording ? (
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    onClick={startVideoRecording}
+                    disabled={engine.status !== 'READY'}
+                  >
+                    <IconRecord className="icon-rec" />
+                    {t('recordVideo')}
+                  </button>
+                ) : (
+                  <button type="button" className="btn btn-danger" onClick={stopVideoRecording}>
+                    <IconStop />
+                    {t('stopReview')}
+                  </button>
+                )}
+                <button type="button" className="btn btn-ghost" onClick={() => setShowGuide(true)}>
+                  <IconFilm />
+                  {t('videoGuide')}
+                </button>
+                {summary && !summaryOpen && (
+                  <button type="button" className="btn btn-ghost" onClick={() => setSummaryOpen(true)}>
+                    <IconAward />
+                    {t('sumView')}
+                  </button>
+                )}
+              </div>
+              <div className="dock-toggles">
+                <label className="switch" title={t('showCamera')}>
+                  <input
+                    type="checkbox"
+                    role="switch"
+                    checked={showCamera}
+                    onChange={(e) => setShowCamera(e.target.checked)}
+                  />
+                  <span className="switch-track" aria-hidden="true" />
+                  <span>{t('toggleCamera')}</span>
+                </label>
+                <label className="switch">
+                  <input
+                    type="checkbox"
+                    role="switch"
+                    checked={show3dMesh}
+                    onChange={(e) => setShow3dMesh(e.target.checked)}
+                  />
+                  <span className="switch-track" aria-hidden="true" />
+                  <span>{t('toggleMesh')}</span>
+                </label>
+              </div>
+            </div>
+          )}
+
+          {practice && recordedUrl && (
+            <section className="card replay-card" ref={replayRef} aria-labelledby="replay-title">
+              <header className="card-head">
+                <h2 id="replay-title" className="card-title">
+                  <IconFilm size={16} />
+                  {t('recordedTitle')}
+                </h2>
+              </header>
+              <video src={recordedUrl} controls playsInline className="replay-video" />
+              <p className="muted small">{t('recordedHint')}</p>
+              <div className="replay-actions">
+                <a href={recordedUrl} download={`cpr-practice-${Date.now()}.webm`} className="btn btn-secondary">
+                  <IconDownload />
+                  {t('downloadVideo')}
+                </a>
+                <button
+                  type="button"
+                  className="btn btn-ghost danger-text"
+                  onClick={() => {
+                    URL.revokeObjectURL(recordedUrl);
+                    setRecordedUrl(null);
+                  }}
+                >
+                  <IconTrash />
+                  {t('deleteVideo')}
+                </button>
+              </div>
+            </section>
+          )}
+        </div>
+
+        <aside className="cockpit-side">
+          {rateCard}
+          {postureCard}
+          {coachSlot && <div className="coach-dock">{coachSlot}</div>}
+        </aside>
+      </div>
+
+      {!practice && <EmergencySteps t={t} />}
+
+      {practice && (
+        <div className="lower-grid">
+          <HistoryPanel
+            lang={lang}
+            entries={history}
+            onDelete={(id) => setHistory(deleteHistoryEntry(id))}
+            onClear={() => setHistory(clearHistory())}
+          />
+          <RecorderPanel
+            t={t}
+            meta={recMeta}
+            onMeta={setRecMeta}
+            isRecording={isRecording}
+            rows={hud.rows}
+            taps={hud.taps}
+            onToggle={toggleRecording}
+            onTap={tapGroundTruth}
+            onDownload={() => recorder.download(recMeta.subjectId)}
+            onClear={() => recorder.clear()}
+          />
+        </div>
+      )}
+
+      {practice && summary && summaryOpen && (
+        <div className="modal-backdrop" onClick={() => setSummaryOpen(false)}>
+          <div
+            className="modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="sum-title"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <SummaryCard
+              t={t}
+              s={summary}
+              onClose={() => setSummaryOpen(false)}
+              onPracticeAgain={
+                engine.status === 'READY'
+                  ? () => {
+                      setSummaryOpen(false);
+                      startSession();
+                    }
+                  : undefined
+              }
+              onReviewVideo={
+                recordedUrl
+                  ? () => {
+                      setSummaryOpen(false);
+                      replayRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    }
+                  : undefined
+              }
+            />
+          </div>
+        </div>
+      )}
+
+      {practice && showGuide && (
+        <div className="modal-backdrop" onClick={() => setShowGuide(false)}>
+          <div
+            className="modal modal-wide"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="guide-title"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <header className="modal-head">
+              <h2 id="guide-title">{t('guideTitle')}</h2>
+              <button type="button" className="btn-icon" onClick={() => setShowGuide(false)} aria-label={t('close')}>
+                <IconX />
+              </button>
+            </header>
+            <video src={asset('cpr-guide.mp4')} controls playsInline className="guide-video" />
+            <ul className="guide-tips">
+              <li>
+                <span className="guide-num num">01</span>
+                <div>
+                  <strong>{t('guideHandTitle')}</strong>
+                  <p>{t('guideHand')}</p>
+                </div>
+              </li>
+              <li>
+                <span className="guide-num num">02</span>
+                <div>
+                  <strong>{t('guidePostureTitle')}</strong>
+                  <p>{t('guidePosture')}</p>
+                </div>
+              </li>
+              <li>
+                <span className="guide-num num">03</span>
+                <div>
+                  <strong>{t('guideCameraTitle')}</strong>
+                  <p>{t('guideCamera')}</p>
+                </div>
+              </li>
+            </ul>
+          </div>
+        </div>
+      )}
+
+      <p className="limits">
+        <IconInfo size={16} />
+        <span>{t('limits')}</span>
+      </p>
     </div>
   );
 }

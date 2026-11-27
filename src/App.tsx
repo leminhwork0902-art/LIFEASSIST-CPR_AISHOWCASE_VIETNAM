@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { PoseTracker } from './components/PoseTracker.tsx';
 import { CoachAvatar } from './components/CoachAvatar.tsx';
+import { IconHeartPulse } from './components/Icons.tsx';
 import { tr } from './i18n.ts';
 import { APP_VERSION } from './lib/config.ts';
 import type { Lang } from './lib/audio.ts';
@@ -47,42 +48,66 @@ function App() {
   return (
     <div className="app">
       <header className="app-header">
-        <div>
-          <h1>{t('appTitle')}</h1>
-          <p>{t('appSubtitle')}</p>
+        <div className="brand">
+          <span className="brand-mark" aria-hidden="true">
+            <IconHeartPulse size={22} />
+          </span>
+          <div className="brand-text">
+            <h1>{t('appTitle')}</h1>
+            <p>{t('appSubtitle')}</p>
+          </div>
         </div>
-        <div className="lang-switch" role="group" aria-label={t('language')}>
-          <button
-            type="button"
-            className={lang === 'vi' ? 'active' : ''}
-            onClick={() => setLang('vi')}
-          >
-            VI
-          </button>
-          <button
-            type="button"
-            className={lang === 'en' ? 'active' : ''}
-            onClick={() => setLang('en')}
-          >
-            EN
-          </button>
+        <div className="header-actions">
+          <span className="privacy-badge">
+            <span className="badge-dot" aria-hidden="true" />
+            {t('appBadge')}
+          </span>
+          <div id="mode-slot" className="mode-slot" />
+          <div className="lang-switch" role="group" aria-label={t('language')}>
+            <button
+              type="button"
+              className={lang === 'vi' ? 'active' : ''}
+              aria-pressed={lang === 'vi'}
+              onClick={() => setLang('vi')}
+            >
+              VI
+            </button>
+            <button
+              type="button"
+              className={lang === 'en' ? 'active' : ''}
+              aria-pressed={lang === 'en'}
+              onClick={() => setLang('en')}
+            >
+              EN
+            </button>
+          </div>
         </div>
       </header>
 
-      <PoseTracker lang={lang} onCoachStatusChange={setCoachStatus} />
-
-      <footer className="app-footer">v{APP_VERSION}</footer>
-
-      <div style={{ position: 'fixed', right: 16, bottom: 16, zIndex: 50 }}>
-        <CoachAvatar
-          state={coachStatus.state}
+      <main className="app-main">
+        <PoseTracker
           lang={lang}
-          bpm={coachStatus.bpm}
-          disableAutoSpeech={coachStatus.isActiveSession}
-          externalSpeaking={coachStatus.externalSpeaking}
-          showDebugControls={false}
+          onCoachStatusChange={setCoachStatus}
+          modeSlotId="mode-slot"
+          coachSlot={
+            <CoachAvatar
+              state={coachStatus.state}
+              lang={lang}
+              bpm={coachStatus.bpm}
+              disableAutoSpeech={coachStatus.isActiveSession}
+              externalSpeaking={coachStatus.externalSpeaking}
+              showDebugControls={false}
+            />
+          }
         />
-      </div>
+      </main>
+
+      <footer className="app-footer">
+        <span>LifeAssist CPR</span>
+        <span className="num">
+          {t('footerVersion')} {APP_VERSION}
+        </span>
+      </footer>
     </div>
   );
 }

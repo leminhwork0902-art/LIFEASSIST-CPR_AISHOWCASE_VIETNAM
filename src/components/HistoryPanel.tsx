@@ -2,6 +2,8 @@ import { useState } from 'react';
 import type { Lang } from '../lib/audio.ts';
 import type { HistoryEntry } from '../lib/historyStorage.ts';
 import type { MainIssue } from '../lib/sessionScorer.ts';
+import { tr } from '../i18n.ts';
+import { IconChevron, IconHistory, IconX } from './Icons.tsx';
 
 interface HistoryPanelProps {
   lang: Lang;
@@ -41,315 +43,158 @@ function formatDateTime(iso: string, lang: Lang): string {
   }
 }
 
-export function HistoryPanel({
-  lang,
-  entries,
-  onDelete,
-  onClear,
-}: HistoryPanelProps) {
-  const isEn = lang === 'en';
+export function HistoryPanel({ lang, entries, onDelete, onClear }: HistoryPanelProps) {
+  const t = tr(lang);
   const [open, setOpen] = useState(false);
   const [confirmClear, setConfirmClear] = useState(false);
 
   const validSessions = entries.filter((e) => e.enoughData && e.avgBpm !== null);
   const overallAvgBpm =
     validSessions.length > 0
-      ? Math.round(
-          validSessions.reduce((acc, cur) => acc + (cur.avgBpm ?? 0), 0) /
-            validSessions.length
-        )
+      ? Math.round(validSessions.reduce((acc, cur) => acc + (cur.avgBpm ?? 0), 0) / validSessions.length)
       : null;
   const bestTargetPct =
-    validSessions.length > 0
-      ? Math.max(...validSessions.map((e) => e.bpmInTargetPct ?? 0))
-      : null;
+    validSessions.length > 0 ? Math.max(...validSessions.map((e) => e.bpmInTargetPct ?? 0)) : null;
+
+  const trend = validSessions.slice(0, 10).reverse();
 
   return (
-    <div
-      style={{
-        marginTop: 12,
-        borderRadius: 12,
-        background: 'rgba(15, 23, 42, 0.75)',
-        border: '1px solid rgba(148, 163, 184, 0.2)',
-        overflow: 'hidden',
-      }}
-    >
+    <section className="card accordion panel-history" data-open={open}>
       <button
         type="button"
+        className="accordion-head"
+        aria-expanded={open}
+        aria-controls="history-body"
         onClick={() => {
           setOpen((v) => !v);
           setConfirmClear(false);
         }}
-        style={{
-          width: '100%',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          padding: '10px 14px',
-          background: 'transparent',
-          border: 'none',
-          color: '#e2e8f0',
-          fontSize: 13.5,
-          fontWeight: 600,
-          cursor: 'pointer',
-          textAlign: 'left',
-        }}
       >
-        <span>
-          {open ? '▾' : '▸'}{' '}
-          {isEn
-            ? `Practice History (${entries.length})`
-            : `Lịch sử tập luyện (${entries.length})`}
+        <span className="accordion-icon" aria-hidden="true">
+          <IconHistory />
+        </span>
+        <span className="accordion-title">
+          <span>
+            {t('histTitle')} <span className="muted num">({entries.length})</span>
+          </span>
         </span>
         {overallAvgBpm !== null && (
-          <span style={{ fontSize: 12, color: '#94a3b8', fontWeight: 500 }}>
-            {isEn ? 'Avg:' : 'TB:'} {overallAvgBpm} BPM
+          <span className="pill tone-info">
+            {t('histAvgBpm')}: <span className="num">{overallAvgBpm}</span>
           </span>
         )}
+        <IconChevron className="accordion-chevron" />
       </button>
 
       {open && (
-        <div
-          style={{
-            padding: '0 14px 14px',
-            borderTop: '1px solid rgba(148, 163, 184, 0.12)',
-          }}
-        >
+        <div className="accordion-body" id="history-body">
           {entries.length === 0 ? (
-            <p
-              style={{
-                margin: '12px 0 0',
-                fontSize: 13,
-                color: '#94a3b8',
-              }}
-            >
-              {isEn
-                ? 'No sessions saved yet. Complete a 30-second practice session to record your progress.'
-                : 'Chưa có buổi tập nào được lưu. Hoàn thành một bài tập 30 giây để lưu kết quả tại đây.'}
-            </p>
+            <p className="muted">{t('histEmpty')}</p>
           ) : (
             <>
-              <div
-                style={{
-                  display: 'flex',
-                  flexWrap: 'wrap',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  gap: 8,
-                  padding: '10px 0',
-                  fontSize: 12,
-                  color: '#cbd5e1',
-                }}
-              >
-                <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap' }}>
-                  <span>
-                    {isEn ? 'Sessions:' : 'Số buổi:'}{' '}
-                    <strong style={{ color: '#fff' }}>{entries.length}</strong>
-                  </span>
-                  {overallAvgBpm !== null && (
-                    <span>
-                      {isEn ? 'Avg BPM:' : 'BPM trung bình:'}{' '}
-                      <strong style={{ color: '#38bdf8' }}>
-                        {overallAvgBpm}
-                      </strong>
-                    </span>
-                  )}
-                  {bestTargetPct !== null && (
-                    <span>
-                      {isEn ? 'Best target rate:' : 'Đạt nhịp cao nhất:'}{' '}
-                      <strong style={{ color: '#4ade80' }}>
-                        {bestTargetPct}%
-                      </strong>
-                    </span>
-                  )}
+              <div className="hist-stats">
+                <div className="hist-stat">
+                  <span className="sum-label">{t('histSessions')}</span>
+                  <strong className="num">{entries.length}</strong>
                 </div>
+                <div className="hist-stat">
+                  <span className="sum-label">{t('histAvgBpm')}</span>
+                  <strong className="num tone-info">{overallAvgBpm ?? '—'}</strong>
+                </div>
+                <div className="hist-stat">
+                  <span className="sum-label">{t('histBest')}</span>
+                  <strong className="num tone-good">{bestTargetPct !== null ? `${bestTargetPct}%` : '—'}</strong>
+                </div>
+              </div>
 
+              {trend.length > 1 && (
+                <div className="hist-trend">
+                  <span className="sum-label">{t('histTrend')}</span>
+                  <div className="hist-bars" role="img" aria-label={t('histTrend')}>
+                    {trend.map((e) => {
+                      const v = e.bpmInTargetPct ?? 0;
+                      const tone = v >= 70 ? 'good' : v >= 40 ? 'warn' : 'bad';
+                      return (
+                        <span key={e.id} className="hist-bar" title={`${v}%`}>
+                          <span className={`hist-bar-fill tone-${tone}`} style={{ height: `${Math.max(4, v)}%` }} />
+                        </span>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              <ul className="hist-list">
+                {entries.map((item) => {
+                  const tone = !item.enoughData ? 'idle' : item.mainIssue === 'NONE' ? 'good' : 'warn';
+                  const badgeText = !item.enoughData ? t('histShort') : ISSUE_LABELS[lang][item.mainIssue];
+                  return (
+                    <li key={item.id} className="hist-item">
+                      <div className="hist-item-main">
+                        <div className="hist-item-head">
+                          <span className="muted num">{formatDateTime(item.recordedAt, lang)}</span>
+                          <span className={`pill tone-${tone}`}>{badgeText}</span>
+                        </div>
+                        <dl className="hist-item-metrics">
+                          <div>
+                            <dt>{t('histCompressions')}</dt>
+                            <dd className="num">{item.totalCompressions}</dd>
+                          </div>
+                          <div>
+                            <dt>BPM</dt>
+                            <dd className="num">{item.avgBpm !== null ? item.avgBpm : '—'}</dd>
+                          </div>
+                          <div>
+                            <dt>{t('histTarget')}</dt>
+                            <dd className="num">{item.bpmInTargetPct !== null ? `${item.bpmInTargetPct}%` : '—'}</dd>
+                          </div>
+                          <div>
+                            <dt>{t('histPosture')}</dt>
+                            <dd className="num">{item.goodPosturePct !== null ? `${item.goodPosturePct}%` : '—'}</dd>
+                          </div>
+                        </dl>
+                      </div>
+                      <button
+                        type="button"
+                        className="btn-icon"
+                        onClick={() => onDelete(item.id)}
+                        title={t('histDelete')}
+                        aria-label={t('histDelete')}
+                      >
+                        <IconX size={16} />
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+
+              <div className="hist-footer">
                 {!confirmClear ? (
-                  <button
-                    type="button"
-                    onClick={() => setConfirmClear(true)}
-                    style={{
-                      background: 'rgba(239, 68, 68, 0.15)',
-                      color: '#fca5a5',
-                      border: '1px solid rgba(239, 68, 68, 0.35)',
-                      borderRadius: 6,
-                      padding: '3px 8px',
-                      fontSize: 11.5,
-                      cursor: 'pointer',
-                    }}
-                  >
-                    {isEn ? 'Clear all' : 'Xóa tất cả'}
+                  <button type="button" className="btn btn-ghost btn-sm danger-text" onClick={() => setConfirmClear(true)}>
+                    {t('histClearAll')}
                   </button>
                 ) : (
-                  <div style={{ display: 'flex', gap: 6 }}>
+                  <>
                     <button
                       type="button"
+                      className="btn btn-danger btn-sm"
                       onClick={() => {
                         onClear();
                         setConfirmClear(false);
                       }}
-                      style={{
-                        background: '#ef4444',
-                        color: '#fff',
-                        border: 'none',
-                        borderRadius: 6,
-                        padding: '3px 8px',
-                        fontSize: 11.5,
-                        fontWeight: 600,
-                        cursor: 'pointer',
-                      }}
                     >
-                      {isEn ? 'Confirm' : 'Xác nhận xóa'}
+                      {t('histConfirm')}
                     </button>
-                    <button
-                      type="button"
-                      onClick={() => setConfirmClear(false)}
-                      style={{
-                        background: 'rgba(255,255,255,0.1)',
-                        color: '#cbd5e1',
-                        border: 'none',
-                        borderRadius: 6,
-                        padding: '3px 8px',
-                        fontSize: 11.5,
-                        cursor: 'pointer',
-                      }}
-                    >
-                      {isEn ? 'Cancel' : 'Hủy'}
+                    <button type="button" className="btn btn-ghost btn-sm" onClick={() => setConfirmClear(false)}>
+                      {t('histCancel')}
                     </button>
-                  </div>
+                  </>
                 )}
-              </div>
-
-              <div
-                style={{
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: 8,
-                  maxHeight: 260,
-                  overflowY: 'auto',
-                }}
-              >
-                {entries.map((item) => {
-                  const isGood = item.enoughData && item.mainIssue === 'NONE';
-                  const badgeBg = !item.enoughData
-                    ? 'rgba(148, 163, 184, 0.18)'
-                    : isGood
-                      ? 'rgba(74, 222, 128, 0.18)'
-                      : 'rgba(251, 191, 36, 0.18)';
-                  const badgeColor = !item.enoughData
-                    ? '#cbd5e1'
-                    : isGood
-                      ? '#4ade80'
-                      : '#fbbf24';
-                  const badgeText = !item.enoughData
-                    ? isEn
-                      ? 'Short session'
-                      : 'Chưa đủ dữ liệu'
-                    : ISSUE_LABELS[lang][item.mainIssue];
-
-                  return (
-                    <div
-                      key={item.id}
-                      style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'space-between',
-                        gap: 10,
-                        padding: '8px 10px',
-                        borderRadius: 8,
-                        background: 'rgba(30, 41, 59, 0.7)',
-                        border: '1px solid rgba(148, 163, 184, 0.14)',
-                        fontSize: 12.5,
-                      }}
-                    >
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div
-                          style={{
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: 8,
-                            flexWrap: 'wrap',
-                            marginBottom: 4,
-                          }}
-                        >
-                          <span style={{ color: '#94a3b8', fontSize: 11.5 }}>
-                            {formatDateTime(item.recordedAt, lang)}
-                          </span>
-                          <span
-                            style={{
-                              padding: '1px 7px',
-                              borderRadius: 999,
-                              background: badgeBg,
-                              color: badgeColor,
-                              fontSize: 11,
-                              fontWeight: 600,
-                            }}
-                          >
-                            {badgeText}
-                          </span>
-                        </div>
-
-                        <div
-                          style={{
-                            display: 'flex',
-                            gap: 12,
-                            flexWrap: 'wrap',
-                            color: '#e2e8f0',
-                          }}
-                        >
-                          <span>
-                            {isEn ? 'Compressions:' : 'Số lần ép:'}{' '}
-                            <strong>{item.totalCompressions}</strong>
-                          </span>
-                          <span>
-                            BPM:{' '}
-                            <strong>
-                              {item.avgBpm !== null ? item.avgBpm : '-'}
-                            </strong>
-                          </span>
-                          <span>
-                            {isEn ? '100–120 BPM:' : 'Đạt nhịp:'}{' '}
-                            <strong>
-                              {item.bpmInTargetPct !== null
-                                ? `${item.bpmInTargetPct}%`
-                                : '-'}
-                            </strong>
-                          </span>
-                          <span>
-                            {isEn ? 'Good posture:' : 'Tư thế tốt:'}{' '}
-                            <strong>
-                              {item.goodPosturePct !== null
-                                ? `${item.goodPosturePct}%`
-                                : '-'}
-                            </strong>
-                          </span>
-                        </div>
-                      </div>
-
-                      <button
-                        type="button"
-                        onClick={() => onDelete(item.id)}
-                        title={isEn ? 'Delete entry' : 'Xóa buổi này'}
-                        aria-label={isEn ? 'Delete entry' : 'Xóa buổi này'}
-                        style={{
-                          background: 'transparent',
-                          color: '#94a3b8',
-                          border: 'none',
-                          padding: '4px 6px',
-                          cursor: 'pointer',
-                          fontSize: 13,
-                        }}
-                      >
-                        ✕
-                      </button>
-                    </div>
-                  );
-                })}
               </div>
             </>
           )}
         </div>
       )}
-    </div>
+    </section>
   );
 }

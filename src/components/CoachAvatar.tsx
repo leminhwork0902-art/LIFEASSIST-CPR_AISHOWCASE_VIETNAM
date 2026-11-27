@@ -1,6 +1,15 @@
 import { useEffect, useRef, useState } from 'react';
+import type { CSSProperties } from 'react';
 import * as THREE from 'three';
 import type { Lang } from '../lib/audio';
+import { tr } from '../i18n.ts';
+import {
+  IconMinimize,
+  IconPlay,
+  IconStop,
+  IconVolume,
+  IconVolumeOff,
+} from './Icons.tsx';
 import {
   COACH_ACCENT_COLORS,
   COACH_CUES,
@@ -44,7 +53,6 @@ export function CoachAvatar({
   externalSpeaking = false,
   showDebugControls = false,
 }: CoachAvatarProps) {
-  const isEn = lang === 'en';
   const mountRef = useRef<HTMLDivElement | null>(null);
   const audioRef = useRef<CoachAudioController | null>(null);
 
@@ -470,7 +478,21 @@ export function CoachAvatar({
 
     animate();
 
+    const resizeObserver =
+      typeof ResizeObserver !== 'undefined'
+        ? new ResizeObserver(() => {
+            const w = container.clientWidth;
+            const h = container.clientHeight;
+            if (w === 0 || h === 0) return;
+            camera.aspect = w / h;
+            camera.updateProjectionMatrix();
+            renderer.setSize(w, h);
+          })
+        : null;
+    resizeObserver?.observe(container);
+
     return () => {
+      resizeObserver?.disconnect();
       cancelAnimationFrame(frameId);
       renderer.dispose();
       whiteMat.dispose();
@@ -482,163 +504,92 @@ export function CoachAvatar({
     };
   }, [collapsed]);
 
+  const t = tr(lang);
   const accentColor = COACH_ACCENT_COLORS[activeState] ?? '#38bdf8';
   const cue =
     COACH_CUES[lang]?.[activeState] ??
     COACH_CUES.vi[activeState] ??
     COACH_CUES.vi.idle;
+  const accentStyle = { '--coach-accent': accentColor } as CSSProperties;
+  const showRate = bpm !== null && bpm > 0;
 
   if (collapsed) {
     return (
       <button
         type="button"
+        className="coach-collapsed"
+        style={accentStyle}
         onClick={() => setCollapsed(false)}
-        aria-label={isEn ? 'Expand AI Coach' : 'Mở rộng AI Coach'}
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 8,
-          padding: '10px 14px',
-          borderRadius: 999,
-          background: 'rgba(15, 23, 42, 0.92)',
-          border: `1.5px solid ${accentColor}`,
-          boxShadow: '0 8px 24px rgba(0,0,0,0.45)',
-          color: '#f8fafc',
-          cursor: 'pointer',
-          backdropFilter: 'blur(10px)',
-          fontFamily: 'system-ui, -apple-system, sans-serif',
-          fontSize: 13,
-          fontWeight: 600,
-        }}
+        aria-label={t('coachExpand')}
       >
-        <span
-          style={{
-            width: 10,
-            height: 10,
-            borderRadius: '50%',
-            background: accentColor,
-            boxShadow: `0 0 8px ${accentColor}`,
-          }}
-        />
-        <span>AI Coach · {cue.badge}</span>
-        {bpm !== null && bpm > 0 && (
-          <span style={{ color: '#94a3b8', fontSize: 12 }}>
-            {Math.round(bpm)} BPM
-          </span>
+        <span className={`coach-dot ${effectiveSpeaking ? 'speaking' : ''}`} aria-hidden="true" />
+        <span className="coach-collapsed-label">
+          {t('coachTitle')} · {cue.badge}
+        </span>
+        {showRate && (
+          <span className="coach-collapsed-bpm num">{Math.round(bpm)} BPM</span>
         )}
       </button>
     );
   }
 
   return (
-    <div
-      style={{
-        width: 260,
-        maxWidth: 'calc(100vw - 32px)',
-        borderRadius: 16,
-        background: 'rgba(15, 23, 42, 0.88)',
-        border: `1.5px solid ${accentColor}`,
-        boxShadow: '0 10px 30px rgba(0,0,0,0.45)',
-        color: '#f8fafc',
-        overflow: 'hidden',
-        backdropFilter: 'blur(10px)',
-        fontFamily: 'system-ui, -apple-system, sans-serif',
-      }}
-    >
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          gap: 6,
-          padding: '8px 10px',
-          borderBottom: '1px solid rgba(255,255,255,0.08)',
-          fontSize: 12,
-        }}
-      >
-        <span
-          style={{
-            fontWeight: 700,
-            color: accentColor,
-            whiteSpace: 'nowrap',
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-          }}
-        >
-          • AI Coach · {cue.badge}
+    <section className="coach" style={accentStyle} aria-label={t('coachTitle')}>
+      <header className="coach-head">
+        <span className="coach-title">
+          <span className={`coach-dot ${effectiveSpeaking ? 'speaking' : ''}`} aria-hidden="true" />
+          <span className="coach-name">{t('coachTitle')}</span>
+          <span className="coach-badge">{cue.badge}</span>
         </span>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+        <div className="coach-tools">
           <button
             type="button"
+            className="btn-icon"
             onClick={() => setMuted((prev) => !prev)}
-            title={
-              muted
-                ? isEn
-                  ? 'Unmute'
-                  : 'Bật tiếng'
-                : isEn
-                  ? 'Mute'
-                  : 'Tắt tiếng'
-            }
-            style={{
-              background: 'rgba(255,255,255,0.1)',
-              color: '#fff',
-              border: 'none',
-              borderRadius: 6,
-              padding: '3px 7px',
-              cursor: 'pointer',
-              fontSize: 12,
-            }}
+            title={muted ? t('coachUnmute') : t('coachMute')}
+            aria-label={muted ? t('coachUnmute') : t('coachMute')}
+            aria-pressed={muted}
           >
-            {muted ? '🔇' : '🔊'}
+            {muted ? <IconVolumeOff size={16} /> : <IconVolume size={16} />}
           </button>
           <button
             type="button"
+            className="btn-icon"
             onClick={() => setCollapsed(true)}
-            title={isEn ? 'Minimize' : 'Thu gọn'}
-            aria-label={isEn ? 'Minimize AI Coach' : 'Thu gọn AI Coach'}
-            style={{
-              background: 'rgba(255,255,255,0.1)',
-              color: '#fff',
-              border: 'none',
-              borderRadius: 6,
-              padding: '3px 8px',
-              cursor: 'pointer',
-              fontSize: 12,
-              fontWeight: 700,
-            }}
+            title={t('coachMinimize')}
+            aria-label={t('coachMinimize')}
           >
-            —
+            <IconMinimize size={16} />
           </button>
         </div>
+      </header>
+
+      <div className="coach-stage">
+        <div ref={mountRef} className="coach-canvas" />
       </div>
 
-      <div
-        ref={mountRef}
-        style={{ width: '100%', height: 210, position: 'relative' }}
-      />
-
-      <div
-        style={{
-          padding: '0 12px 10px',
-          fontSize: 12.5,
-          lineHeight: 1.45,
-          color: '#e2e8f0',
-          minHeight: 42,
-        }}
-      >
-        "{cue.text}"
-        {bpm !== null && bpm > 0 && activeState !== 'demo' && (
-          <div style={{ marginTop: 4, fontSize: 11, color: '#94a3b8' }}>
-            {isEn ? 'Current rate:' : 'Nhịp hiện tại:'}{' '}
-            <strong style={{ color: '#fff' }}>{Math.round(bpm)} BPM</strong>
-          </div>
+      <div className={`coach-bubble ${effectiveSpeaking ? 'speaking' : ''}`} aria-live="polite">
+        {effectiveSpeaking && (
+          <span className="coach-wave" aria-label={t('coachSpeaking')}>
+            <span />
+            <span />
+            <span />
+            <span />
+            <span />
+          </span>
+        )}
+        <p className="coach-text">{cue.text}</p>
+        {showRate && activeState !== 'demo' && (
+          <p className="coach-rate">
+            {t('coachCurrentRate')}: <strong className="num">{Math.round(bpm)} BPM</strong>
+          </p>
         )}
       </div>
 
-      <div style={{ padding: '0 12px 12px', display: 'flex', gap: 6 }}>
+      <div className="coach-actions">
         <button
           type="button"
+          className={`btn btn-block ${activeState === 'demo' ? 'btn-danger' : 'btn-primary'}`}
           onClick={() => {
             if (activeState === 'demo') {
               setManualOverride(state === 'demo' ? 'idle' : null);
@@ -646,37 +597,14 @@ export function CoachAvatar({
               setManualOverride('demo');
             }
           }}
-          style={{
-            flex: 1,
-            padding: '7px 10px',
-            borderRadius: 8,
-            border: 'none',
-            cursor: 'pointer',
-            fontWeight: 600,
-            fontSize: 12,
-            background: activeState === 'demo' ? '#ef4444' : '#0ea5e9',
-            color: '#fff',
-          }}
         >
-          {activeState === 'demo'
-            ? isEn
-              ? 'Stop demo'
-              : 'Dừng làm mẫu'
-            : isEn
-              ? '▶ Watch 110 BPM demo'
-              : '▶ Xem mẫu 110 BPM'}
+          {activeState === 'demo' ? <IconStop size={16} /> : <IconPlay size={16} />}
+          {activeState === 'demo' ? t('coachStopDemo') : t('coachDemo')}
         </button>
       </div>
 
       {showDebugControls && (
-        <div
-          style={{
-            padding: '0 10px 10px',
-            display: 'flex',
-            flexWrap: 'wrap',
-            gap: 4,
-          }}
-        >
+        <div className="coach-debug">
           {(
             [
               'idle',
@@ -690,24 +618,15 @@ export function CoachAvatar({
             <button
               key={s}
               type="button"
+              className={activeState === s ? 'active' : ''}
               onClick={() => setManualOverride(s)}
-              style={{
-                fontSize: 10,
-                padding: '3px 6px',
-                borderRadius: 5,
-                border: '1px solid rgba(255,255,255,0.2)',
-                background:
-                  activeState === s ? COACH_ACCENT_COLORS[s] : 'transparent',
-                color: activeState === s ? '#0f172a' : '#cbd5e1',
-                cursor: 'pointer',
-                fontWeight: 600,
-              }}
             >
               {DEBUG_LABELS[lang]?.[s] ?? s}
             </button>
           ))}
         </div>
       )}
-    </div>
+    </section>
   );
 }
+
