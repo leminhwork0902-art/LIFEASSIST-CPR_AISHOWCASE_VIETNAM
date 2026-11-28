@@ -4,11 +4,12 @@
 
 # LifeAssist CPR
 
-**An AI chest-compression coach for students and the community — runs entirely in the browser, with no video sent or stored.**
+**An AI chest-compression coach for students and the community — the AI runs entirely in the browser, and no video is ever uploaded.**
 
 *Real-time compression-rate and arm-posture feedback from a single camera. No video leaves your device.*
 
 [![WAICY 2026](https://img.shields.io/badge/WAICY-2026%20AI%20Showcase-E11D48?style=flat-square)](https://waicy.org)
+[![Results](https://img.shields.io/badge/Results-Pending-F59E0B?style=flat-square)](#submission-materials)
 [![React](https://img.shields.io/badge/React-19-61DAFB?style=flat-square&logo=react&logoColor=black)](https://react.dev/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178C6?style=flat-square&logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 [![Vite](https://img.shields.io/badge/Vite-8-646CFF?style=flat-square&logo=vite&logoColor=white)](https://vite.dev/)
@@ -18,7 +19,7 @@
 [![Privacy](https://img.shields.io/badge/Video-never%20uploaded-16A34A?style=flat-square)](#7-privacy)
 [![Status](https://img.shields.io/badge/Status-Prototype%20v0.2.0-F59E0B?style=flat-square)](#10-honest-status--limitations)
 
-[🌐 Live Demo](https://lifeassist-cpr-pi.vercel.app/) • [✨ Features](#2-features) • [🧠 Algorithms](#3-how-it-works) • [🏗️ Structure](#4-project-structure) • [🚀 Quick Start](#5-quick-start) • [🔒 Privacy](#7-privacy) • [⚠️ Limitations](#10-honest-status--limitations)
+[🌐 Live Demo](https://lifeassist-cpr-pi.vercel.app/) • [📎 Submission](#submission-materials) • [✨ Features](#2-features) • [🧠 Algorithms](#3-how-it-works) • [🏗️ Structure](#4-project-structure) • [🚀 Quick Start](#5-quick-start) • [🔒 Privacy](#7-privacy) • [⚠️ Limitations](#10-honest-status--limitations)
 
 </div>
 
@@ -31,6 +32,23 @@
 
 ---
 
+## Submission Materials
+
+**WAICY 2026 — AI Showcase** · **Pending Results: WAICY 2026**
+
+| Item | Link |
+| :--- | :--- |
+| 📝 **Description & AI Usage** | [PASTE_DESCRIPTION_AND_AI_USAGE_LINK_HERE](PASTE_DESCRIPTION_AND_AI_USAGE_LINK_HERE) |
+| 🎬 **Demo Video** | [PASTE_DEMO_VIDEO_LINK_HERE](PASTE_DEMO_VIDEO_LINK_HERE) |
+| 🎤 **Presentation Video** | [PASTE_PRESENTATION_VIDEO_LINK_HERE](PASTE_PRESENTATION_VIDEO_LINK_HERE) |
+| 📎 **Additional Materials** | [Google Doc](https://docs.google.com/document/d/1dQWqOfxhNLPFBkVKDl3cy8mf6JskBu6ZNnNfqHjQKkU/edit?usp=sharing) |
+| 🌐 **Live Demo** | [lifeassist-cpr-pi.vercel.app](https://lifeassist-cpr-pi.vercel.app/) |
+| 🏁 **Status** | ⏳ **Pending Results: WAICY 2026** |
+
+<!-- Before publishing, search this file for "PASTE_" and replace each placeholder with the real link. -->
+
+---
+
 ## 1. Overview
 
 Cardiac arrest can happen to anyone, anywhere, and early, correctly paced chest compressions are something non-medical people can do. But doing them well takes **practice with feedback**, while most learners only watch a video or practise briefly with an instructor.
@@ -39,7 +57,7 @@ Cardiac arrest can happen to anyone, anywhere, and early, correctly paced chest 
 
 | Principle | Meaning |
 | :--- | :--- |
-| 🔒 **Private by design** | The AI model runs inside the browser. No server receives video, and there are no accounts. |
+| 🔒 **Private by design** | The AI model runs inside the browser. No server receives video, and there are no accounts. Exactly what is (and is not) sent is listed in [Section 7](#7-privacy). |
 | 🎯 **Honest about numbers** | Any figure that has not been measured on real data is not claimed. See [Section 10](#10-honest-status--limitations). |
 | 🚨 **Emergency first** | A minimal Emergency mode: a call-115 button, a 110 BPM metronome and 4 guidance steps. |
 | 🌏 **Bilingual** | The whole interface and the voice cues are available in Vietnamese and English. |
@@ -62,6 +80,9 @@ Cardiac arrest can happen to anyone, anywhere, and early, correctly paced chest 
 | **Fair scoring** | Only the moments when you are compressing count (the 3 seconds of getting into position do not drag the score down). With less than 5 seconds of compressions, the app **prints no percentages** rather than a meaningless number. |
 | **Guide video** | A video on posture and placing the camera at a 90° side view. |
 | **3D overlay** | A wireframe of the arm and hand (Three.js) that follows real movement. |
+| **AI coach avatar** | A 3D coach (Three.js) with six states (*ready · 110 BPM demo · good form · straighten elbows · push faster · slow down*). Each state has a text badge and a spoken line in Vietnamese or English, with a cool-down so cues do not repeat. |
+| **Practice history** | The last 30 sessions are kept in the browser's `localStorage` (never uploaded) and can be deleted one by one or all at once. |
+| **Session replay** | An optional recording of the practice session that is replayed inside the browser and only saved if the user presses download (`.webm`). It is never uploaded. |
 
 ### 2.2 Emergency mode (minimal)
 
@@ -74,6 +95,7 @@ Cardiac arrest can happen to anyone, anywhere, and early, correctly paced chest 
 - **Data recording** exports a 16-column CSV containing only *numeric joint coordinates* (no images, no audio).
 - A second person presses the **Space bar** on every compression to provide an **independent ground truth** (`gt_tap`).
 - Two Python scripts train the posture classifier and measure BPM error, **splitting train/test by person** (no data leakage).
+- When a practice session ends with at least one compression, a **numeric summary** is also posted to an optional Google Sheets webhook so the team can log sessions (see [Section 7](#7-privacy)).
 
 ### 2.4 Robustness in real use
 
@@ -85,6 +107,8 @@ Cardiac arrest can happen to anyone, anywhere, and early, correctly paced chest 
 | Voice files missing | Uses a fallback synthetic voice and shows a yellow warning (never silent). |
 | Low FPS (< 15) | Warns that the rate measurement may be less accurate. |
 | Hand tracking lost | The rate counter resets its state, so jumping coordinates are not counted as compressions. |
+| Coach-avatar voice files missing (`public/audio/coach/`) | Falls back to the browser's speech synthesis (`speechSynthesis`) in the chosen language. |
+| Browser blocks `localStorage` | History and language choice are simply not saved; the session itself still works. |
 
 ---
 
@@ -153,6 +177,8 @@ Three posture labels: `CORRECT_POSTURE` · `BENT_ELBOW` · `OFF_AXIS`. When both
 │   ├── i18n.ts                      # All bilingual UI strings
 │   ├── components/
 │   │   ├── PoseTracker.tsx          # Camera, detection loop, HUD, practice session
+│   │   ├── CoachAvatar.tsx          # 3D coach avatar with spoken cues (Three.js)
+│   │   ├── HistoryPanel.tsx         # Practice history (last 30 sessions, local only)
 │   │   ├── EmergencyPanel.tsx       # Emergency mode: call 115, metronome, 4 steps
 │   │   ├── SummaryCard.tsx          # End-of-session results card
 │   │   └── RecorderPanel.tsx        # CSV data recording for the research team
@@ -163,6 +189,9 @@ Three posture labels: `CORRECT_POSTURE` · `BENT_ELBOW` · `OFF_AXIS`. When both
 │   │   ├── sessionScorer.ts         # Time-based session scoring
 │   │   ├── audio.ts                 # Pre-recorded voice + WebAudio metronome
 │   │   ├── csvRecorder.ts           # Joint-coordinate CSV export (no images)
+│   │   ├── coachAudio.ts            # Coach cues (text + audio), cool-down, speech-synthesis fallback
+│   │   ├── historyStorage.ts        # Practice history in localStorage (max 30 entries)
+│   │   ├── sheetsSync.ts            # Optional numeric session summary → Google Sheets webhook
 │   │   ├── config.ts                # Every "magic number" of the system
 │   │   └── assets.ts                # Asset paths that also work when deployed in a sub-folder
 │   ├── tracking/                    # Two-arm tracking + 3D wireframe overlay (Three.js)
@@ -170,6 +199,7 @@ Three posture labels: `CORRECT_POSTURE` · `BENT_ELBOW` · `OFF_AXIS`. When both
 ├── public/
 │   ├── mediapipe/                   # .task models + wasm, served locally (no CDN calls)
 │   ├── audio/{vi,en}/               # faster · slower · straighten · shoulders (.mp3)
+│   │   └── (coach/{vi,en}/ is read by the coach avatar; not in the repo yet → speech-synthesis fallback)
 │   ├── icons/                       # PWA icons 192 / 512 / maskable
 │   └── cpr-guide.mp4                # Posture and camera-placement guide video
 ├── ml/                              # Python: training + evaluation (leave-one-person-out)
@@ -259,11 +289,14 @@ For camera placement, posture labels, the parental consent form and the list of 
 
 | Topic | How it is handled |
 | :--- | :--- |
-| **Video** | Processed entirely on the device. Never sent anywhere, never stored. |
-| **Collected data** | Only when the user explicitly starts recording: **numeric joint coordinates**, downloaded as a CSV. No images, no audio, no faces. |
+| **Video** | Processed entirely on the device. Never sent anywhere. The optional session replay stays in browser memory and is only saved to the user's device if they press download. |
+| **Practice history** | The last 30 session summaries are stored in the browser's `localStorage` on the user's own device. |
+| **Session summary sent to the team** | When a practice session ends with at least one compression, a **numeric summary** (compression count, duration, average rate, % in range, % good posture, main issue) plus the research fields set in the recorder panel (subject code, posture label, camera angle, lighting, device / notes) is posted to a **Google Sheets (Apps Script) webhook** used by the team. **No video, images, audio or joint coordinates are included.** The URL can be replaced or disabled with the `VITE_SHEETS_WEBHOOK_URL` environment variable. |
+| **Collected research data** | Only when the user explicitly starts recording: **numeric joint coordinates**, downloaded as a CSV. No images, no audio, no faces. |
 | **Identity** | Data is tagged with an **anonymous code** (S01, S02, …). The code ↔ name table is not in the repo. |
 | **Participants who are minors** | Parental consent is required. `ml/data/*` is in `.gitignore` and **must not be pushed to a public GitHub repository**. |
-| **Accounts / servers** | None. |
+| **Third-party requests** | The page loads its fonts from Google Fonts. The AI models and WebAssembly files are served from the app itself (no CDN). |
+| **Accounts** | None. |
 
 ---
 
@@ -309,6 +342,7 @@ This is a **prototype, v0.2.0**. The team states what is and is not verified so 
 - Very shallow compressions (wrist amplitude < 0.04 of torso length), such as light compressions on a pillow, may not be counted.
 - Simulation suggests that dropping 30% of frames at 15 FPS loses about 7% of compressions.
 - There is no team-trained classifier yet (it needs data from at least 6 people).
+- The coach avatar's voice lines (`public/audio/coach/`) have not been recorded; until then the browser's speech synthesis is used, and its voice quality depends on the device.
 
 ### ❌ Inherent limits of the approach
 
@@ -353,22 +387,24 @@ The app uses **AHA 2025** as its standard. Some Vietnamese web pages still state
 | **UI** | React 19, TypeScript, plain CSS |
 | **Build** | Vite, `vite-plugin-pwa`, oxlint |
 | **Perception** | MediaPipe Tasks Vision (Pose Landmarker + Hand Landmarker), run locally via WebAssembly (GPU, falling back to CPU) |
-| **3D graphics** | Three.js (arm and hand wireframe) |
+| **3D graphics** | Three.js (arm and hand wireframe, coach avatar) |
 | **Audio** | Web Audio API (metronome, pre-recorded voice), `speechSynthesis` fallback |
 | **Data analysis** | Python, NumPy, pandas, scikit-learn |
+| **Optional logging** | Google Apps Script webhook → Google Sheets (numeric session summaries only) |
 
 ---
 
 ## 14. Team
 
 **Grade 11 Mathematics, Pho Thong Nang Khieu (PTNK) High School for the Gifted — Group 1**
-Project entered in **WAICY 2026 (AI Showcase)**.
+Project entered in **WAICY 2026 (AI Showcase)** · **Pending Results: WAICY 2026**
 
 | Member | Role |
 | :--- | :--- |
-| _Full name_ | _Role_ |
-| _Full name_ | _Role_ |
-| _Full name_ | _Role_ |
+| Le Minh | _Role_ |
+| Le Nghiem Gia Phu | _Role_ |
+| Le Tran Quang Bao | _Role_ |
+| Nguyen Ha Phuong | _Role_ |
 
 ---
 
@@ -383,7 +419,7 @@ Project entered in **WAICY 2026 (AI Showcase)**.
 
 ## 16. License
 
-There is no `LICENSE` file in the repository yet. Add a license (for example MIT) before making the project public.
+Released under the [MIT License](./LICENSE).
 
 ---
 
